@@ -1,0 +1,11 @@
+<mat-toolbar color="warn">
+  <div class="navbar-content">
+    <button mat-icon-button aria-label="Меню">
+      <mat-icon>menu</mat-icon>
+    </button>
+    <span>Моё приложение</span>
+    <button mat-icon-button aria-label="Меню" (click)="themeService.toggle()">
+      <mat-icon>{{ themeService.isDark() ? 'wb_sunny' : 'nights_stay' }}</mat-icon>
+    </button>
+  </div>
+</mat-toolbar>

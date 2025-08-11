@@ -1,83 +1,72 @@
 package repository
 
 import (
-	"center"
+	"hotel"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type Authorization interface {
-	CreateUser(user center.UserCreate) (int, error)
-	GetUser(username, password string) (center.UserRet, error)
-	CheckUser(username string) (bool, error)
+	CreateUser(user hotel.User) (int, error)
+	GetUser(username, password string) (hotel.User, error)
 }
 
-type LabService interface {
-	Create(client center.LabService) (int, error)
-	GetAll() ([]center.LabService, error)
-	GetById(client_id int) (center.LabService, error)
+type Client interface {
+	Create(client hotel.Client) (int, error)
+	GetAll() ([]hotel.Client, error)
+	GetById(client_id int) (hotel.ClientFunc, error)
 	Delete(client_id int) error
-	Update(client_id int, input center.LabServiceUpdate) error
+	Update(client_id int, input hotel.ClientUpdate) error
 }
 
-type Patient interface {
-	Create(client center.Patient) (int, error)
-	GetAll() ([]center.Patient, error)
-	GetById(client_id int) (center.Patient, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.PatientUpdate) error
+type App interface {
+	Create(app hotel.App) (int, error)
+	GetAll() ([]hotel.App, error)
+	GetById(app_id int) ([]hotel.App, error)
+	Delete(app_id int) error
+	Update(app_id int, input hotel.AppUpdate) error
 }
 
-type ProvidedService interface {
-	Create(client center.ProvidedService) (int, error)
-	GetAll() ([]center.ProvidedService, error)
-	GetById(client_id int) (center.ProvidedService, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.ProvidedServiceUpdate) error
+type AppType interface {
+	Create(appType hotel.AppType) (int, error)
+	GetAll() ([]hotel.AppType, error)
+	GetById(appTypeId int) (hotel.AppType, error)
+	Delete(appTypeId int) error
+	Update(appTypeId int, input hotel.AppTypeUpdate) error
 }
 
-type Analyzer interface {
-	Create(client center.Analyzer) (int, error)
-	GetAll() ([]center.Analyzer, error)
-	GetById(client_id int) (center.Analyzer, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.AnalyzerUpdate) error
+type AppService interface {
+	Create(appService hotel.AppService) (int, error)
+	GetAll() ([]hotel.AppService, error)
+	GetById(AppServiceId int) ([]hotel.AppServiceTypeFunc, error)
+	Delete(AppServiceId int) error
+	Update(AppServiceId int, input hotel.AppServiceUpdate) error
 }
 
-type InsuranceCompany interface {
-	Create(client center.InsuranceCompany) (int, error)
-	GetAll() ([]center.InsuranceCompany, error)
-	GetById(client_id int) (center.InsuranceCompany, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.InsuranceCompanyUpdate) error
-}
-
-type Order interface {
-	Create(client center.Order) (int, error)
-	GetAll() ([]center.Order, error)
-	GetById(client_id int) (center.Order, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.OrderUpdate) error
+type AppServiceType interface {
+	Create(appServiceType hotel.AppServiceType) (int, error)
+	GetAll() ([]hotel.AppServiceType, error)
+	GetById(appServiceTypeId int) (hotel.AppServiceType, error)
+	Delete(appServiceTypeId int) error
+	Update(appServiceTypeId int, input hotel.AppServiceTypeUpdate) error
 }
 
 type Repository struct {
 	Authorization
-	LabService
-	Patient
-	ProvidedService
-	Analyzer
-	InsuranceCompany
-	Order
+	Client
+	App
+	AppType
+	AppService
+	AppServiceType
 }
 
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{
-		Authorization:    NewAuthPostgres(db),
-		LabService:       NewLabServicePostgres(db),
-		Patient:          NewPatientPostgres(db),
-		ProvidedService:  NewProvidedServicePostgres(db),
-		Analyzer:         NewAnalyzerPostgres(db),
-		InsuranceCompany: NewInsuranceCompanyPostgres(db),
-		Order:            NewOrderPostgres(db),
+		Authorization:  NewAuthPostgres(db),
+		Client:         NewClientPostgres(db),
+		App:            NewAppPostgres(db),
+		AppType:        NewAppTypePostgres(db),
+		AppService:     NewAppServicePostgres(db),
+		AppServiceType: NewAppServiceTypePostgres(db),
 	}
 }

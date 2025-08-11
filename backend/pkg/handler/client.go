@@ -1,21 +1,21 @@
 package handler
 
 import (
-	"center"
+	"hotel"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) createPatient(c *gin.Context) {
-	var input center.Patient
+func (h *Handler) createClient(c *gin.Context) {
+	var input hotel.Client
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	id, err := h.services.Patient.Create(input)
+	id, err := h.services.Client.Create(input)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -26,52 +26,52 @@ func (h *Handler) createPatient(c *gin.Context) {
 	})
 }
 
-type getAllPatientsResponse struct {
-	Data []center.Patient `json:"data"`
+type getAllClientsResponse struct {
+	Data []hotel.Client `json:"data"`
 }
 
-func (h *Handler) getAllPatients(c *gin.Context) {
-	Patients, err := h.services.Patient.GetAll()
+func (h *Handler) getAllClients(c *gin.Context) {
+	clients, err := h.services.Client.GetAll()
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, getAllPatientsResponse{
-		Data: Patients,
+	c.JSON(http.StatusOK, getAllClientsResponse{
+		Data: clients,
 	})
 }
 
-func (h *Handler) getPatientById(c *gin.Context) {
+func (h *Handler) getClientById(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	Patients, err := h.services.Patient.GetById(id)
+	client, err := h.services.Client.GetById(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, Patients)
+	c.JSON(http.StatusOK, client)
 }
 
-func (h *Handler) updatePatient(c *gin.Context) {
+func (h *Handler) updateClient(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	var input center.PatientUpdate
+	var input hotel.ClientUpdate
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.services.Patient.Update(id, input); err != nil {
+	if err := h.services.Client.Update(id, input); err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -79,14 +79,14 @@ func (h *Handler) updatePatient(c *gin.Context) {
 	c.JSON(http.StatusOK, statusResponse{"ok"})
 }
 
-func (h *Handler) deletePatient(c *gin.Context) {
+func (h *Handler) deleteClient(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	err = h.services.Patient.Delete(id)
+	err = h.services.Client.Delete(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return

@@ -1,11 +1,11 @@
 package service
 
 import (
-	"center"
-	"center/pkg/repository"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hotel"
+	"hotel/pkg/repository"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -13,14 +13,13 @@ import (
 
 const (
 	salt       = "hjqrhjqw124617ajfhajs"
-	signingKey = "center#test#just#some###24214texTTTT#S"
+	signingKey = "hotel#test#just#some###24214texTTTT#S"
 	tokenTTL   = 12 * time.Hour
 )
 
 type tokenClaims struct {
 	jwt.StandardClaims
-	UserId   int `json:"user_id"`
-	UserRole int `json:"user_role"`
+	UserId int `json:"user_id"`
 }
 
 type AuthService struct {
@@ -31,24 +30,8 @@ func NewAuthService(repo repository.Authorization) *AuthService {
 	return &AuthService{repo: repo}
 }
 
-func (s *AuthService) CreateUser(user center.UserCreate) (int, error) {
-
-	if user.UserType != int(center.PATIENT) {
-		responceUserId, err := getUserIDFromToken(user.ResponceUser)
-
-		if err != nil {
-			return 0, err
-		}
-
-		isAdmin, err := s.repo.CheckUser(responceUserId)
-
-		if err != nil || isAdmin != true {
-			return 0, err
-		}
-	}
-
+func (s *AuthService) CreateUser(user hotel.User) (int, error) {
 	user.Password = s.generatePasswordHash(user.Password)
-
 	return s.repo.CreateUser(user)
 }
 
@@ -63,8 +46,7 @@ func (s *AuthService) GenerateToken(username, password string) (string, error) {
 			ExpiresAt: time.Now().Add(tokenTTL).Unix(),
 			IssuedAt:  time.Now().Unix(),
 		},
-		UserId:   user.Id,
-		UserRole: user.UserType,
+		UserId: user.Id,
 	})
 
 	return token.SignedString([]byte(signingKey))
@@ -95,16 +77,4 @@ func (s *AuthService) generatePasswordHash(password string) string {
 	hash.Write([]byte(password))
 
 	return fmt.Sprintf("%x", hash.Sum([]byte(salt)))
-}
-
-func getUserIDFromToken(token *jwt.Token) (string, error) {
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", errors.New("Failed to extract claims from the token")
-	}
-	userID, ok := claims["sub"].(string)
-	if !ok {
-		return "", errors.New("User ID not found in the token")
-	}
-	return userID, nil
 }

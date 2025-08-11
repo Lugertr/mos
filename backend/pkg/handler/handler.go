@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"center/pkg/service"
+	"hotel/pkg/service"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -31,115 +31,51 @@ func (h *Handler) InitRoutes() *gin.Engine {
 
 	api := router.Group("/api", h.userIdentity)
 	{
-		LabServices := api.Group("/LabServices")
+		clients := api.Group("/clients")
 		{
-			LabServices.POST("/", h.createLabService)
-			LabServices.GET("/", h.getAllLabServices)
-			LabServices.GET("/:id", h.getLabServiceById)
-			LabServices.PUT("/:id", h.updateLabService)
-			LabServices.DELETE("/:id", h.deleteLabService)
+			clients.POST("/", h.createClient)
+			clients.GET("/", h.getAllClients)
+			clients.GET("/:id", h.getClientById)
+			clients.PUT("/:id", h.updateClient)
+			clients.DELETE("/:id", h.deleteClient)
 		}
 
-		Patients := api.Group("/Patients")
+		app := api.Group("/app")
 		{
-			Patients.POST("/", h.createPatient)
-			Patients.GET("/", h.getAllPatients)
-			Patients.GET("/:id", h.getPatientById)
-			Patients.PUT("/:id", h.updatePatient)
-			Patients.DELETE("/:id", h.deletePatient)
+			app.POST("/", h.createApp)
+			app.GET("/", h.getAllApps)
+			app.GET("/:id", h.getAppById)
+			app.PUT("/:id", h.updateApp)
+			app.DELETE("/:id", h.deleteApp)
 		}
 
-		InsuranceCompanies := api.Group("/InsuranceCompanies")
+		appType := api.Group("/appType")
 		{
-			InsuranceCompanies.POST("/", h.createInsuranceCompany)
-			InsuranceCompanies.GET("/", h.getAllInsuranceCompanies)
-			InsuranceCompanies.GET("/:id", h.getInsuranceCompanyById)
-			InsuranceCompanies.PUT("/:id", h.updateInsuranceCompany)
-			InsuranceCompanies.DELETE("/:id", h.deleteInsuranceCompany)
+			appType.POST("/", h.createAppType)
+			appType.GET("/", h.getAllAppTypes)
+			appType.GET("/:id", h.getAppTypeById)
+			appType.PUT("/:id", h.updateAppType)
+			appType.DELETE("/:id", h.deleteAppType)
 		}
 
-		Orders := api.Group("/Orders")
+		appService := api.Group("/appService")
 		{
-			Orders.POST("/", h.createOrder)
-			Orders.GET("/", h.getAllOrders)
-			Orders.GET("/:id", h.getOrderById)
-			Orders.PUT("/:id", h.updateOrder)
-			Orders.DELETE("/:id", h.deleteOrder)
+			appService.POST("/", h.createAppService)
+			appService.GET("/", h.getAllAppServices)
+			appService.GET("/:id", h.getAppServiceById)
+			appService.PUT("/:id", h.updateAppService)
+			appService.DELETE("/:id", h.deleteAppService)
 		}
 
-		ProvidedServices := api.Group("/ProvidedServices")
+		appServiceType := api.Group("/appServiceType")
 		{
-			ProvidedServices.POST("/", h.createProvidedService)
-			ProvidedServices.GET("/", h.getAllProvidedServices)
-			ProvidedServices.GET("/:id", h.getProvidedServiceById)
-			ProvidedServices.PUT("/:id", h.updateProvidedService)
-			ProvidedServices.DELETE("/:id", h.deleteProvidedService)
+			appServiceType.POST("/", h.createAppServiceType)
+			appServiceType.GET("/", h.getAllAppServiceTypes)
+			appServiceType.GET("/:id", h.getAppServiceTypeById)
+			appServiceType.PUT("/:id", h.updateAppServiceType)
+			appServiceType.DELETE("/:id", h.deleteAppServiceType)
 		}
 
-		Analyzer := api.Group("/Analyzers")
-		{
-			Analyzer.POST("/", h.createAnalyzer)
-			Analyzer.GET("/", h.getAllAnalyzers)
-			Analyzer.GET("/:id", h.getAnalyzerById)
-			Analyzer.PUT("/:id", h.updateAnalyzer)
-			Analyzer.DELETE("/:id", h.deleteAnalyzer)
-		}
-
-		/*
-			LabTechnicians := api.Group("/LabTechnicians")
-			{
-				LabTechnicians.POST("/", h.LabTechnicians)
-				LabTechnicians.GET("/", h.LabTechnicians)
-				LabTechnicians.GET("/:id", h.LabTechnicians)
-				LabTechnicians.PUT("/:id", h.updateLabTechnicians)
-				LabTechnicians.DELETE("/:id", h.deleteLabTechnicians)
-			}
-
-			Accountants := api.Group("/Accountants")
-			{
-				Accountants.POST("/", h.Accountants)
-				Accountants.GET("/", h.Accountants)
-				Accountants.GET("/:id", h.Accountants)
-				Accountants.PUT("/:id", h.updateAccountants)
-				Accountants.DELETE("/:id", h.deleteAccountants)
-			}
-
-			Administrators := api.Group("/Administrators")
-			{
-				Administrators.POST("/", h.Administrators)
-				Administrators.GET("/", h.Administrators)
-				Administrators.GET("/:id", h.Administrators)
-				Administrators.PUT("/:id", h.updateAdministrators)
-				Administrators.DELETE("/:id", h.deleteAdministrators)
-			}
-
-			ArchivedData := api.Group("/ArchivedData")
-			{
-				ArchivedData.POST("/", h.ArchivedData)
-				ArchivedData.GET("/", h.ArchivedData)
-				ArchivedData.GET("/:id", h.ArchivedData)
-				ArchivedData.PUT("/:id", h.updateArchivedData)
-				ArchivedData.DELETE("/:id", h.deleteArchivedData)
-			}
-
-			FailedLoginAttempts := api.Group("/FailedLoginAttempts")
-			{
-				FailedLoginAttempts.POST("/", h.FailedLoginAttempts)
-				FailedLoginAttempts.GET("/", h.FailedLoginAttempts)
-				FailedLoginAttempts.GET("/:id", h.FailedLoginAttempts)
-				FailedLoginAttempts.PUT("/:id", h.updateFailedLoginAttempts)
-				FailedLoginAttempts.DELETE("/:id", h.deleteFailedLoginAttempts)
-			}
-
-			LoginHistory := api.Group("/LoginHistory")
-			{
-				LoginHistory.POST("/", h.LoginHistory)
-				LoginHistory.GET("/", h.LoginHistory)
-				LoginHistory.GET("/:id", h.LoginHistory)
-				LoginHistory.PUT("/:id", h.updateLoginHistory)
-				LoginHistory.DELETE("/:id", h.deleteLoginHistory)
-			}
-		*/
 	}
 
 	return router

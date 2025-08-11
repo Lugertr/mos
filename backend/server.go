@@ -1,4 +1,4 @@
-package center
+package hotel
 
 import (
 	"context"

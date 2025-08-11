@@ -1,4 +1,4 @@
-module center
+module hotel
 
 go 1.20
 

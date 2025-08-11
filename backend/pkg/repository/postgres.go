@@ -7,13 +7,19 @@ import (
 )
 
 const (
-	usersTable            = "users"
-	analyzerTable         = "analyzers"
-	insuranceCompanyTable = "insurance_companies"
-	labServiceTable       = "lab_services"
-	orderTable            = "orders"
-	patientTable          = "patients"
-	providedServiceTable  = "provided_services"
+	usersTable          = "users"
+	clientTable         = "client_table"
+	appTable            = "app_table"
+	appTypeTable        = "app_type_table"
+	appServiceTable     = "service_table"
+	appServiceTypeTable = "service_type_table"
+	hotelListsTable     = "hotel_lists"
+	usersListsTable     = "users_list"
+	hotelItemsTable     = "hotel_items"
+	listsItemsTable     = "lists_items"
+	appFunc             = "get_today_tomorrow()"
+	serviceFunc         = "get_service_types()"
+	clientFunc          = "get_client_info($1)"
 )
 
 type Config struct {

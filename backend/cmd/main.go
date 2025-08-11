@@ -1,11 +1,11 @@
 package main
 
 import (
-	"center"
-	"center/pkg/handler"
-	"center/pkg/repository"
-	"center/pkg/service"
 	"context"
+	"hotel"
+	"hotel/pkg/handler"
+	"hotel/pkg/repository"
+	"hotel/pkg/service"
 	"os"
 	"os/signal"
 	"syscall"
@@ -43,7 +43,7 @@ func main() {
 	services := service.NewService(repos)
 	handlers := handler.NewHandler(services)
 
-	srv := new(center.Server)
+	srv := new(hotel.Server)
 	go func() {
 		if err := srv.Run(viper.GetString("port"), handlers.InitRoutes()); err != nil {
 			logrus.Fatalf("error while running http server: %s", err.Error())

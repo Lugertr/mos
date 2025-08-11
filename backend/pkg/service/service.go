@@ -1,84 +1,73 @@
 package service
 
 import (
-	"center"
-	"center/pkg/repository"
+	"hotel"
+	"hotel/pkg/repository"
 )
 
 //go:generate mockgen -source=service.go -destination=mocks/mock.go
 
 type Authorization interface {
-	CreateUser(user center.UserCreate) (int, error)
+	CreateUser(user hotel.User) (int, error)
 	GenerateToken(username, password string) (string, error)
 	ParseToken(token string) (int, error)
 }
 
-type LabService interface {
-	Create(client center.LabService) (int, error)
-	GetAll() ([]center.LabService, error)
-	GetById(client_id int) (center.LabService, error)
+type Client interface {
+	Create(client hotel.Client) (int, error)
+	GetAll() ([]hotel.Client, error)
+	GetById(client_id int) (hotel.ClientFunc, error)
 	Delete(client_id int) error
-	Update(client_id int, input center.LabServiceUpdate) error
+	Update(client_id int, input hotel.ClientUpdate) error
 }
 
-type Patient interface {
-	Create(client center.Patient) (int, error)
-	GetAll() ([]center.Patient, error)
-	GetById(client_id int) (center.Patient, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.PatientUpdate) error
+type App interface {
+	Create(app hotel.App) (int, error)
+	GetAll() ([]hotel.App, error)
+	GetById(app_id int) ([]hotel.App, error)
+	Delete(app_id int) error
+	Update(app_id int, input hotel.AppUpdate) error
 }
 
-type ProvidedService interface {
-	Create(client center.ProvidedService) (int, error)
-	GetAll() ([]center.ProvidedService, error)
-	GetById(client_id int) (center.ProvidedService, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.ProvidedServiceUpdate) error
+type AppType interface {
+	Create(appType hotel.AppType) (int, error)
+	GetAll() ([]hotel.AppType, error)
+	GetById(appTypeId int) (hotel.AppType, error)
+	Delete(appTypeId int) error
+	Update(appTypeId int, input hotel.AppTypeUpdate) error
 }
 
-type Analyzer interface {
-	Create(client center.Analyzer) (int, error)
-	GetAll() ([]center.Analyzer, error)
-	GetById(client_id int) (center.Analyzer, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.AnalyzerUpdate) error
+type AppService interface {
+	Create(appService hotel.AppService) (int, error)
+	GetAll() ([]hotel.AppService, error)
+	GetById(AppServiceId int) ([]hotel.AppServiceTypeFunc, error)
+	Delete(AppServiceId int) error
+	Update(AppServiceId int, input hotel.AppServiceUpdate) error
 }
 
-type InsuranceCompany interface {
-	Create(client center.InsuranceCompany) (int, error)
-	GetAll() ([]center.InsuranceCompany, error)
-	GetById(client_id int) (center.InsuranceCompany, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.InsuranceCompanyUpdate) error
+type AppServiceType interface {
+	Create(appServiceType hotel.AppServiceType) (int, error)
+	GetAll() ([]hotel.AppServiceType, error)
+	GetById(appServiceTypeId int) (hotel.AppServiceType, error)
+	Delete(appServiceTypeId int) error
+	Update(appServiceTypeId int, input hotel.AppServiceTypeUpdate) error
 }
-
-type Order interface {
-	Create(client center.Order) (int, error)
-	GetAll() ([]center.Order, error)
-	GetById(client_id int) (center.Order, error)
-	Delete(client_id int) error
-	Update(client_id int, input center.OrderUpdate) error
-}
-
 type Service struct {
 	Authorization
-	LabService
-	Patient
-	ProvidedService
-	Analyzer
-	InsuranceCompany
-	Order
+	Client
+	App
+	AppType
+	AppService
+	AppServiceType
 }
 
 func NewService(repos *repository.Repository) *Service {
 	return &Service{
-		Authorization:    NewAuthService(repos.Authorization),
-		LabService:       NewLabServiceService(repos.LabService),
-		Patient:          NewPatientService(repos.Patient),
-		ProvidedService:  NewProvidedServiceService(repos.ProvidedService),
-		Analyzer:         NewAnalyzerService(repos.Analyzer),
-		InsuranceCompany: NewInsuranceCompanyService(repos.InsuranceCompany),
-		Order:            NewOrderService(repos.Order),
+		Authorization:  NewAuthService(repos.Authorization),
+		Client:         NewClientService(repos.Client),
+		App:            NewAppService(repos.App),
+		AppType:        NewAppTypeService(repos.AppType),
+		AppService:     NewAppServiceService(repos.AppService),
+		AppServiceType: NewAppServiceTypeService(repos.AppServiceType),
 	}
 }

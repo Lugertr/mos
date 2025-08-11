@@ -1,21 +1,21 @@
 package handler
 
 import (
-	"center"
+	"hotel"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) createInsuranceCompany(c *gin.Context) {
-	var input center.InsuranceCompany
+func (h *Handler) createAppType(c *gin.Context) {
+	var input hotel.AppType
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	id, err := h.services.InsuranceCompany.Create(input)
+	id, err := h.services.AppType.Create(input)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -26,52 +26,54 @@ func (h *Handler) createInsuranceCompany(c *gin.Context) {
 	})
 }
 
-type getAllInsuranceCompaniesResponse struct {
-	Data []center.InsuranceCompany `json:"data"`
+type getAllAppTypesResponse struct {
+	Data []hotel.AppType `json:"data"`
 }
 
-func (h *Handler) getAllInsuranceCompanies(c *gin.Context) {
-	InsuranceCompanies, err := h.services.InsuranceCompany.GetAll()
+func (h *Handler) getAllAppTypes(c *gin.Context) {
+	AppTypes, err := h.services.AppType.GetAll()
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, getAllInsuranceCompaniesResponse{
-		Data: InsuranceCompanies,
+	c.JSON(http.StatusOK, getAllAppTypesResponse{
+		Data: AppTypes,
 	})
 }
 
-func (h *Handler) getInsuranceCompanyById(c *gin.Context) {
+func (h *Handler) getAppTypeById(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	InsuranceCompanies, err := h.services.InsuranceCompany.GetById(id)
+	AppType, err := h.services.AppType.GetById(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, InsuranceCompanies)
+	c.JSON(http.StatusOK, AppType)
 }
 
-func (h *Handler) updateInsuranceCompany(c *gin.Context) {
+func (h *Handler) updateAppType(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	var input center.InsuranceCompanyUpdate
+	var input hotel.AppTypeUpdate
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.services.InsuranceCompany.Update(id, input); err != nil {
+	if err := h.services.AppType.Update(id, input); err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -79,14 +81,15 @@ func (h *Handler) updateInsuranceCompany(c *gin.Context) {
 	c.JSON(http.StatusOK, statusResponse{"ok"})
 }
 
-func (h *Handler) deleteInsuranceCompany(c *gin.Context) {
+func (h *Handler) deleteAppType(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	err = h.services.InsuranceCompany.Delete(id)
+	err = h.services.AppType.Delete(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return

@@ -1,0 +1,14 @@
+<mat-nav-list>
+  @for (menu of menuItems; track menu) {
+  <a
+    mat-list-item
+    [routerLink]="menu.path"
+    routerLinkActive="active-link"
+    [routerLinkActiveOptions]="{ exact: true }"
+  >
+    <div class="item">
+      <mat-icon>{{ menu.icon }}</mat-icon> <span>{{ menu.title }}</span>
+    </div>
+  </a>
+  }
+</mat-nav-list>

@@ -1,14 +1,14 @@
 package handler
 
 import (
-	"center"
+	"hotel"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) signUp(c *gin.Context) {
-	var input center.UserCreate
+	var input hotel.User
 
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid input body")

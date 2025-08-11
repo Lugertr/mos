@@ -1,21 +1,22 @@
 package handler
 
 import (
-	"center"
+	"hotel"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) createLabService(c *gin.Context) {
-	var input center.LabService
+func (h *Handler) createAppService(c *gin.Context) {
+
+	var input hotel.AppService
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	id, err := h.services.LabService.Create(input)
+	id, err := h.services.AppService.Create(input)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -26,52 +27,54 @@ func (h *Handler) createLabService(c *gin.Context) {
 	})
 }
 
-type getAllLabServicesResponse struct {
-	Data []center.LabService `json:"data"`
+type getAllAppServicesResponse struct {
+	Data []hotel.AppService `json:"data"`
 }
 
-func (h *Handler) getAllLabServices(c *gin.Context) {
-	LabServices, err := h.services.LabService.GetAll()
+func (h *Handler) getAllAppServices(c *gin.Context) {
+
+	AppServices, err := h.services.AppService.GetAll()
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, getAllLabServicesResponse{
-		Data: LabServices,
+	c.JSON(http.StatusOK, getAllAppServicesResponse{
+		Data: AppServices,
 	})
 }
 
-func (h *Handler) getLabServiceById(c *gin.Context) {
+func (h *Handler) getAppServiceById(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	LabService, err := h.services.LabService.GetById(id)
+	AppService, err := h.services.AppService.GetById(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, LabService)
+	c.JSON(http.StatusOK, AppService)
 }
 
-func (h *Handler) updateLabService(c *gin.Context) {
+func (h *Handler) updateAppService(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	var input center.LabServiceUpdate
+	var input hotel.AppServiceUpdate
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.services.LabService.Update(id, input); err != nil {
+	if err := h.services.AppService.Update(id, input); err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -79,14 +82,15 @@ func (h *Handler) updateLabService(c *gin.Context) {
 	c.JSON(http.StatusOK, statusResponse{"ok"})
 }
 
-func (h *Handler) deleteLabService(c *gin.Context) {
+func (h *Handler) deleteAppService(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	err = h.services.LabService.Delete(id)
+	err = h.services.AppService.Delete(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return

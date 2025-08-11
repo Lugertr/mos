@@ -1,21 +1,22 @@
 package handler
 
 import (
-	"center"
+	"hotel"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-func (h *Handler) createOrder(c *gin.Context) {
-	var input center.Order
+func (h *Handler) createAppServiceType(c *gin.Context) {
+
+	var input hotel.AppServiceType
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	id, err := h.services.Order.Create(input)
+	id, err := h.services.AppServiceType.Create(input)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
@@ -26,52 +27,55 @@ func (h *Handler) createOrder(c *gin.Context) {
 	})
 }
 
-type getAllOrdersResponse struct {
-	Data []center.Order `json:"data"`
+type getAllAppServiceTypesResponse struct {
+	Data []hotel.AppServiceType `json:"data"`
 }
 
-func (h *Handler) getAllOrders(c *gin.Context) {
-	Orders, err := h.services.Order.GetAll()
+func (h *Handler) getAllAppServiceTypes(c *gin.Context) {
+
+	AppServiceTypes, err := h.services.AppServiceType.GetAll()
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, getAllOrdersResponse{
-		Data: Orders,
+	c.JSON(http.StatusOK, getAllAppServiceTypesResponse{
+		Data: AppServiceTypes,
 	})
 }
 
-func (h *Handler) getOrderById(c *gin.Context) {
+func (h *Handler) getAppServiceTypeById(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	Orders, err := h.services.Order.GetById(id)
+	AppServiceType, err := h.services.AppServiceType.GetById(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, Orders)
+	c.JSON(http.StatusOK, AppServiceType)
 }
 
-func (h *Handler) updateOrder(c *gin.Context) {
+func (h *Handler) updateAppServiceType(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	var input center.OrderUpdate
+	var input hotel.AppServiceTypeUpdate
 	if err := c.BindJSON(&input); err != nil {
 		newErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.services.Order.Update(id, input); err != nil {
+	if err := h.services.AppServiceType.Update(id, input); err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -79,14 +83,15 @@ func (h *Handler) updateOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, statusResponse{"ok"})
 }
 
-func (h *Handler) deleteOrder(c *gin.Context) {
+func (h *Handler) deleteAppServiceType(c *gin.Context) {
+
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		newErrorResponse(c, http.StatusBadRequest, "invalid id param")
 		return
 	}
 
-	err = h.services.Order.Delete(id)
+	err = h.services.AppServiceType.Delete(id)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return

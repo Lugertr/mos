@@ -1,21 +1,27 @@
--- Удаление триггеров
-DROP TRIGGER IF EXISTS prevent_order_archiving_trigger ON archived_data;
+DROP TRIGGER IF EXISTS client_deletion_trigger ON client_table;
+DROP TRIGGER IF EXISTS insert_client_trigger ON client_table;
+DROP TRIGGER IF EXISTS update_client_trigger ON client_table;
+DROP TRIGGER IF EXISTS delete_client_trigger ON client_table;
+DROP TRIGGER IF EXISTS date_check_trigger ON client_table;
+DROP TRIGGER IF EXISTS service_table_check_service_type_exists ON service_table;
 
--- Удаление таблиц
-DROP TABLE IF EXISTS provided_services;
-DROP TABLE IF EXISTS analyzers;
-DROP TABLE IF EXISTS lab_technicians;
-DROP TABLE IF EXISTS accountants;
-DROP TABLE IF EXISTS administrators;
-DROP TABLE IF EXISTS archived_data;
-DROP TABLE IF EXISTS failed_login_attempts;
-DROP TABLE IF EXISTS login_history;
-DROP TABLE IF EXISTS lab_services;
-DROP TABLE IF EXISTS patients;
-DROP TABLE IF EXISTS insurance_companies;
-DROP TABLE IF EXISTS orders;
+DROP FUNCTION IF EXISTS get_client_info(cur_client_id numeric); --Вернуть чек клиента
+DROP FUNCTION IF EXISTS get_client_services(client_id numeric);
+DROP FUNCTION IF EXISTS client_deletion_trigger_function();
+DROP FUNCTION IF EXISTS count_days(client_id numeric);
+DROP FUNCTION IF EXISTS get_service_types();    --Вернуть неиспользующиеся спросом услуги
+DROP FUNCTION IF EXISTS get_today_tomorrow();   -- Вернуть номера которые освободяться сегодня или завтра
+DROP FUNCTION IF EXISTS update_app_table_on_insert();
+DROP FUNCTION IF EXISTS update_app_table_on_update();
+DROP FUNCTION IF EXISTS update_app_table_on_delete();
+DROP FUNCTION IF EXISTS check_date();
+DROP FUNCTION IF EXISTS check_service_type_exists();
+
+DROP TABLE IF EXISTS service_table;
+DROP TABLE IF EXISTS service_type_table;
+DROP TABLE IF EXISTS old_services_table;
+DROP TABLE IF EXISTS client_table;
+DROP TABLE IF EXISTS old_client_table;
+DROP TABLE IF EXISTS app_table;
+DROP TABLE IF EXISTS app_type_table;
 DROP TABLE IF EXISTS users;
-
-
--- Удаление функций
-DROP FUNCTION IF EXISTS prevent_order_archiving;

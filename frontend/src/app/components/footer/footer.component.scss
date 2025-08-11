@@ -1,0 +1,11 @@
+:host {
+  width: 100%;
+}
+
+.footer-content {
+  margin: auto;
+  display: flex;
+  justify-content: center;
+  max-width: var(--max-width);
+  width: 100%;
+}
