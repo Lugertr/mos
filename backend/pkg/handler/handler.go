@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"hotel/pkg/service"
+	"archive/pkg/service"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -29,53 +29,52 @@ func (h *Handler) InitRoutes() *gin.Engine {
 		auth.POST("/sign-in", h.signIn)
 	}
 
-	api := router.Group("/api", h.userIdentity)
+	ref := router.Group("/api")
 	{
-		clients := api.Group("/clients")
-		{
-			clients.POST("/", h.createClient)
-			clients.GET("/", h.getAllClients)
-			clients.GET("/:id", h.getClientById)
-			clients.PUT("/:id", h.updateClient)
-			clients.DELETE("/:id", h.deleteClient)
-		}
+		// authors
+		ref.POST("/authors", h.createAuthor)
+		ref.GET("/authors", h.getAllAuthors)
+		ref.GET("/authors/:id", h.getAuthorByID)
+		ref.PUT("/authors/:id", h.updateAuthor)
+		ref.DELETE("/authors/:id", h.deleteAuthor)
 
-		app := api.Group("/app")
-		{
-			app.POST("/", h.createApp)
-			app.GET("/", h.getAllApps)
-			app.GET("/:id", h.getAppById)
-			app.PUT("/:id", h.updateApp)
-			app.DELETE("/:id", h.deleteApp)
-		}
+		// document types
+		ref.POST("/document_types", h.createDocumentType)
+		ref.GET("/document_types", h.getAllDocumentTypes)
+		ref.GET("/document_types/:id", h.getDocumentTypeByID)
+		ref.PUT("/document_types/:id", h.updateDocumentType)
+		ref.DELETE("/document_types/:id", h.deleteDocumentType)
 
-		appType := api.Group("/appType")
-		{
-			appType.POST("/", h.createAppType)
-			appType.GET("/", h.getAllAppTypes)
-			appType.GET("/:id", h.getAppTypeById)
-			appType.PUT("/:id", h.updateAppType)
-			appType.DELETE("/:id", h.deleteAppType)
-		}
+		// tags
+		ref.POST("/tags", h.createTag)
+		ref.GET("/tags", h.getAllTags)
+		ref.GET("/tags/:id", h.getTagByID)
+		ref.PUT("/tags/:id", h.updateTag)
+		ref.DELETE("/tags/:id", h.deleteTag)
+	}
 
-		appService := api.Group("/appService")
-		{
-			appService.POST("/", h.createAppService)
-			appService.GET("/", h.getAllAppServices)
-			appService.GET("/:id", h.getAppServiceById)
-			appService.PUT("/:id", h.updateAppService)
-			appService.DELETE("/:id", h.deleteAppService)
-		}
+	// document endpoints (protected)
+	docs := router.Group("/api/documents")
+	docs.Use(h.userIdentityMiddleware)
+	{
+		docs.POST("", h.createDocument)       // multipart/json
+		docs.GET("", h.searchDocumentsByTag)  // query params: tag=..., limit, offset, author, type, date_from, date_to
+		docs.GET("/:id", h.getDocumentByID)   // optional ?requester_id may be ignored (we use token)
+		docs.PUT("/:id", h.updateDocument)    // multipart/json
+		docs.DELETE("/:id", h.deleteDocument) // only allowed if service permits
 
-		appServiceType := api.Group("/appServiceType")
-		{
-			appServiceType.POST("/", h.createAppServiceType)
-			appServiceType.GET("/", h.getAllAppServiceTypes)
-			appServiceType.GET("/:id", h.getAppServiceTypeById)
-			appServiceType.PUT("/:id", h.updateAppServiceType)
-			appServiceType.DELETE("/:id", h.deleteAppServiceType)
-		}
+		// permission management (admin)
+		docs.POST("/:id/permissions", h.setDocumentPermission)      // body: target_user_id, can_view, can_edit
+		docs.DELETE("/:id/permissions", h.removeDocumentPermission) // body: target_user_id
+	}
 
+	// logs endpoints for admin
+	logs := router.Group("/api/logs")
+	logs.Use(h.userIdentityMiddleware)
+	{
+		logs.GET("/by_user", h.getLogsByUser)   // admin only
+		logs.GET("/by_table", h.getLogsByTable) // admin only
+		logs.GET("/by_date", h.getLogsByDate)   // admin only
 	}
 
 	return router

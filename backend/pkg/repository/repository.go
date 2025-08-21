@@ -1,72 +1,81 @@
 package repository
 
 import (
-	"hotel"
+	"archive"
+	"context"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
+type CtxUserIDKey struct{}
+
 type Authorization interface {
-	CreateUser(user hotel.User) (int, error)
-	GetUser(username, password string) (hotel.User, error)
+	CreateUser(ctx context.Context, user archive.User) (int64, error)
+	GetUser(ctx context.Context, login, passwordHash string) (archive.User, error)
 }
 
-type Client interface {
-	Create(client hotel.Client) (int, error)
-	GetAll() ([]hotel.Client, error)
-	GetById(client_id int) (hotel.ClientFunc, error)
-	Delete(client_id int) error
-	Update(client_id int, input hotel.ClientUpdate) error
+type Authors interface {
+	CreateAuthor(ctx context.Context, a archive.Author) (int64, error)
+	GetAllAuthors(ctx context.Context) ([]archive.Author, error)
+	GetAuthor(ctx context.Context, id int64) (archive.Author, error)
+	UpdateAuthor(ctx context.Context, id int64, a archive.Author) error
+	DeleteAuthor(ctx context.Context, id int64) error
 }
 
-type App interface {
-	Create(app hotel.App) (int, error)
-	GetAll() ([]hotel.App, error)
-	GetById(app_id int) ([]hotel.App, error)
-	Delete(app_id int) error
-	Update(app_id int, input hotel.AppUpdate) error
+type DocumentTypes interface {
+	CreateDocumentType(ctx context.Context, t archive.DocumentType) (int64, error)
+	GetAllDocumentTypes(ctx context.Context) ([]archive.DocumentType, error)
+	GetDocumentType(ctx context.Context, id int64) (archive.DocumentType, error)
+	UpdateDocumentType(ctx context.Context, id int64, t archive.DocumentType) error
+	DeleteDocumentType(ctx context.Context, id int64) error
 }
 
-type AppType interface {
-	Create(appType hotel.AppType) (int, error)
-	GetAll() ([]hotel.AppType, error)
-	GetById(appTypeId int) (hotel.AppType, error)
-	Delete(appTypeId int) error
-	Update(appTypeId int, input hotel.AppTypeUpdate) error
+type Tags interface {
+	CreateTag(ctx context.Context, t archive.Tag) (int64, error)
+	GetAllTags(ctx context.Context) ([]archive.Tag, error)
+	GetTag(ctx context.Context, id int64) (archive.Tag, error)
+	UpdateTag(ctx context.Context, id int64, t archive.Tag) error
+	DeleteTag(ctx context.Context, id int64) error
 }
 
-type AppService interface {
-	Create(appService hotel.AppService) (int, error)
-	GetAll() ([]hotel.AppService, error)
-	GetById(AppServiceId int) ([]hotel.AppServiceTypeFunc, error)
-	Delete(AppServiceId int) error
-	Update(AppServiceId int, input hotel.AppServiceUpdate) error
+type Document interface {
+	CreateDocument(ctx context.Context, in archive.DocumentCreateInput) (int64, error)
+	SearchDocumentsByTag(ctx context.Context, filter archive.DocumentSearchFilter) ([]archive.DocumentSecure, error)
+	GetDocumentByID(ctx context.Context, id int64) (archive.DocumentSecure, error)
+	UpdateDocument(ctx context.Context, id int64, in archive.DocumentUpdateInput) error
+	DeleteDocument(ctx context.Context, id int64) error
+
+	SetDocumentPermission(ctx context.Context, docID int64, p archive.DocumentPermission) error
+	RemoveDocumentPermission(ctx context.Context, docID int64, targetUserID int64) error
 }
 
-type AppServiceType interface {
-	Create(appServiceType hotel.AppServiceType) (int, error)
-	GetAll() ([]hotel.AppServiceType, error)
-	GetById(appServiceTypeId int) (hotel.AppServiceType, error)
-	Delete(appServiceTypeId int) error
-	Update(appServiceTypeId int, input hotel.AppServiceTypeUpdate) error
+type Admin interface {
+	GetLogsByUser(ctx context.Context, adminID int64, targetUserID int64, start *time.Time, end *time.Time) ([]archive.LogRecord, error)
+	GetLogsByTable(ctx context.Context, adminID int64, tableName string, start *time.Time, end *time.Time) ([]archive.LogRecord, error)
+	GetLogsByDate(ctx context.Context, adminID int64, start time.Time, end time.Time) ([]archive.LogRecord, error)
 }
 
+// Repository aggregates sub-repos
 type Repository struct {
-	Authorization
-	Client
-	App
-	AppType
-	AppService
-	AppServiceType
+	Authorization Authorization
+	Authors       Authors
+	DocumentTypes DocumentTypes
+	Tags          Tags
+	Document      Document
+	Admin         Admin
+
+	DB *sqlx.DB
 }
 
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{
-		Authorization:  NewAuthPostgres(db),
-		Client:         NewClientPostgres(db),
-		App:            NewAppPostgres(db),
-		AppType:        NewAppTypePostgres(db),
-		AppService:     NewAppServicePostgres(db),
-		AppServiceType: NewAppServiceTypePostgres(db),
+		Authorization: NewAuthPostgres(db),
+		Authors:       NewAuthorsPostgres(db),
+		DocumentTypes: NewDocumentTypesPostgres(db),
+		Tags:          NewTagsPostgres(db),
+		Document:      NewDocumentPostgres(db),
+		Admin:         NewAdminPostgres(db),
+		DB:            db,
 	}
 }

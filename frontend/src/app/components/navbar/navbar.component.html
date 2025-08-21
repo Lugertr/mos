@@ -5,7 +5,12 @@
     </button>
     <span>Моё приложение</span>
     <button mat-icon-button aria-label="Меню" (click)="themeService.toggle()">
-      <mat-icon>{{ themeService.isDark() ? 'wb_sunny' : 'nights_stay' }}</mat-icon>
+      <mat-icon>{{
+        themeService.isDark() ? "wb_sunny" : "nights_stay"
+      }}</mat-icon>
+    </button>
+    <button mat-icon-button aria-label="Меню" (click)="themeService.toggle()">
+      <mat-icon>account_circle</mat-icon>
     </button>
   </div>
 </mat-toolbar>

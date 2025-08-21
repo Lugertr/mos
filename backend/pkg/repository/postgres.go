@@ -2,24 +2,20 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 const (
-	usersTable          = "users"
-	clientTable         = "client_table"
-	appTable            = "app_table"
-	appTypeTable        = "app_type_table"
-	appServiceTable     = "service_table"
-	appServiceTypeTable = "service_type_table"
-	hotelListsTable     = "hotel_lists"
-	usersListsTable     = "users_list"
-	hotelItemsTable     = "hotel_items"
-	listsItemsTable     = "lists_items"
-	appFunc             = "get_today_tomorrow()"
-	serviceFunc         = "get_service_types()"
-	clientFunc          = "get_client_info($1)"
+	usersTable         = "users"
+	authorsTable       = "authors"
+	documentTypesTable = "document_types"
+	tagsTable          = "tags"
+	documentsTable     = "documents"
+	documentTagsTable  = "document_tags"
+	documentPermsTable = "document_permissions"
+	logsTable          = "logs"
 )
 
 type Config struct {
@@ -29,6 +25,7 @@ type Config struct {
 	Password string
 	DBName   string
 	SSLMode  string
+	Timeout  time.Duration
 }
 
 func NewPostgresDB(cfg Config) (*sqlx.DB, error) {
@@ -37,11 +34,12 @@ func NewPostgresDB(cfg Config) (*sqlx.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	if cfg.Timeout > 0 {
+		db.SetConnMaxLifetime(cfg.Timeout)
+	}
 	err = db.Ping()
 	if err != nil {
 		return nil, err
 	}
-
 	return db, nil
 }

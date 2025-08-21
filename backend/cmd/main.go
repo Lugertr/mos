@@ -1,14 +1,15 @@
 package main
 
 import (
+	"archive"
+	"archive/pkg/handler"
+	"archive/pkg/repository"
+	"archive/pkg/service"
 	"context"
-	"hotel"
-	"hotel/pkg/handler"
-	"hotel/pkg/repository"
-	"hotel/pkg/service"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
@@ -25,7 +26,7 @@ func main() {
 	}
 
 	if err := godotenv.Load(); err != nil {
-		logrus.Fatalf("error loading env variables: %s", err.Error())
+		logrus.Warnf(".env file not found or couldn't be loaded: %v", err)
 	}
 
 	db, err := repository.NewPostgresDB(repository.Config{
@@ -39,26 +40,42 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("failed to load db: %s", err.Error())
 	}
+
+	if sqlDB := db.DB; sqlDB != nil {
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(25)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	}
+
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer pingCancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		logrus.Fatalf("db ping failed: %v", err)
+	}
+
 	repos := repository.NewRepository(db)
 	services := service.NewService(repos)
 	handlers := handler.NewHandler(services)
 
-	srv := new(hotel.Server)
+	srv := new(archive.Server)
 	go func() {
 		if err := srv.Run(viper.GetString("port"), handlers.InitRoutes()); err != nil {
 			logrus.Fatalf("error while running http server: %s", err.Error())
 		}
 	}()
 
-	logrus.Print("Server Started")
+	logrus.Info("Server Started")
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-	<-quit
+	stopCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	<-stopCtx.Done()
 
-	logrus.Print("Server Shutting Down")
+	logrus.Info("Server Shutting Down")
 
-	if err := srv.Shutdown(context.Background()); err != nil {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logrus.Errorf("error occured on server shutting down: %s", err.Error())
 	}
 
