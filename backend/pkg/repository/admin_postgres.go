@@ -18,7 +18,8 @@ func NewAdminPostgres(db *sqlx.DB) *AdminPostgres {
 }
 
 func (r *AdminPostgres) GetLogsByUser(ctx context.Context, adminID int64, targetUserID int64, start *time.Time, end *time.Time) ([]archive.LogRecord, error) {
-	query := `SELECT * FROM fn_get_logs_by_user($1,$2,$3,$4)`
+	// SELECT * FROM fn_get_logs_by_user($1,$2,$3,$4)
+	query := `SELECT * FROM ` + fnGetLogsByUser + `($1,$2,$3,$4)`
 	var s interface{}
 	var e interface{}
 	if start != nil {
@@ -35,7 +36,8 @@ func (r *AdminPostgres) GetLogsByUser(ctx context.Context, adminID int64, target
 }
 
 func (r *AdminPostgres) GetLogsByTable(ctx context.Context, adminID int64, tableName string, start *time.Time, end *time.Time) ([]archive.LogRecord, error) {
-	query := `SELECT * FROM fn_get_logs_by_table($1,$2,$3,$4)`
+	// SELECT * FROM fn_get_logs_by_table($1,$2,$3,$4)
+	query := `SELECT * FROM ` + fnGetLogsByTable + `($1,$2,$3,$4)`
 	var s interface{}
 	var e interface{}
 	if start != nil {
@@ -52,7 +54,8 @@ func (r *AdminPostgres) GetLogsByTable(ctx context.Context, adminID int64, table
 }
 
 func (r *AdminPostgres) GetLogsByDate(ctx context.Context, adminID int64, start time.Time, end time.Time) ([]archive.LogRecord, error) {
-	query := `SELECT * FROM fn_get_logs_by_date($1,$2,$3)`
+	// SELECT * FROM fn_get_logs_by_date($1,$2,$3)
+	query := `SELECT * FROM ` + fnGetLogsByDate + `($1,$2,$3)`
 	var logs []archive.LogRecord
 	if err := r.db.SelectContext(ctx, &logs, query, adminID, start, end); err != nil {
 		return nil, err

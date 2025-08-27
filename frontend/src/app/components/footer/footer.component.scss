@@ -1,8 +1,10 @@
 :host {
+  border-top: solid 1px var(--mat-sys-outline-variant);
   width: 100%;
 }
 
-.footer-content {
+.footer {
+  padding: 1rem;
   margin: auto;
   display: flex;
   justify-content: center;

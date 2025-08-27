@@ -44,5 +44,5 @@ export const routes: Routes = [
     path: RoutesPath.SignUp,
     loadComponent: () => import('./pages/auth/sign-up/sign-up.component').then(c => c.SignUpComponent),
   },
-  { path: '**', redirectTo: RoutesPath.SignIn },
+  { path: '**', redirectTo: RoutesPath.Dashboard },
 ];

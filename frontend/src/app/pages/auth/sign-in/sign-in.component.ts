@@ -1,5 +1,5 @@
 import { Component, DestroyRef, inject } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -24,7 +24,6 @@ import { PathWithSlash, RoutesPath } from 'src/app/app.routes';
   styleUrls: ['../auth.scss'],
 })
 export class SignInComponent {
-  private readonly fb = inject(FormBuilder);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -32,11 +31,10 @@ export class SignInComponent {
   private readonly loadingBarSrv = inject(LoadingBarService);
 
   readonly isLoading = toSignal(this.loadingBarSrv.show$);
-  readonly form = this.fb.nonNullable.group({
-    login: ['', [Validators.required]],
-    password: ['', [Validators.required]],
+  readonly form = new FormGroup({
+    login: new FormControl<string>('', { nonNullable: true, validators: [Validators.required] }),
+    password: new FormControl<string>('', { nonNullable: true, validators: [Validators.required] }),
   });
-
   get signUpLink(): string {
     return PathWithSlash(RoutesPath.SignUp);
   }
@@ -48,10 +46,12 @@ export class SignInComponent {
       this.loadingBarSrv.withLoading(),
       takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (res) => {
-          if (res?.token) this.auth.saveToken(res.token);
-          this.router.navigateByUrl('/auth/sign-in');
+          if (res?.token) {
+            this.auth.saveToken(res.token);
+            this.router.navigateByUrl(PathWithSlash(RoutesPath.Dashboard));
+          }
         },
-        error: (err) => this.informerSrv.error(err?.error?.message, 'Ошибка регистрации'),
+        error: (err) => this.informerSrv.error(err?.error?.message, 'Ошибка авторизации'),
       });
 
   }

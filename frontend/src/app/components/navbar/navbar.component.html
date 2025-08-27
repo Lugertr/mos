@@ -1,16 +1,34 @@
-<mat-toolbar color="warn">
+<mat-toolbar>
   <div class="navbar-content">
-    <button mat-icon-button aria-label="Меню">
-      <mat-icon>menu</mat-icon>
-    </button>
-    <span>Моё приложение</span>
-    <button mat-icon-button aria-label="Меню" (click)="themeService.toggle()">
-      <mat-icon>{{
-        themeService.isDark() ? "wb_sunny" : "nights_stay"
-      }}</mat-icon>
-    </button>
-    <button mat-icon-button aria-label="Меню" (click)="themeService.toggle()">
-      <mat-icon>account_circle</mat-icon>
-    </button>
+    <h1>ЛЦТ №9</h1>
+    <div class="navbar-content-list">
+      @if (isAuth) { @for (menu of menuItems; track menu) {
+      <a
+        mat-button
+        [routerLink]="menu.path"
+        routerLinkActive="active-link"
+        [routerLinkActiveOptions]="{ exact: true }"
+      >
+        {{ menu.title }}
+        <mat-icon>{{ menu.icon }}</mat-icon>
+      </a>
+      } }
+    </div>
+
+    <div>
+      <button mat-icon-button (click)="themeService.toggle()">
+        <mat-icon>{{
+          themeService.isDark() ? "wb_sunny" : "nights_stay"
+        }}</mat-icon>
+      </button>
+      @if (isAuth) {
+      <a [routerLink]="userLink" mat-icon-button>
+        <mat-icon>account_circle</mat-icon>
+      </a>
+      <button mat-icon-button (click)="signOut()">
+        <mat-icon>logout</mat-icon>
+      </button>
+      }
+    </div>
   </div>
 </mat-toolbar>

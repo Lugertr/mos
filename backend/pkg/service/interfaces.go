@@ -10,6 +10,7 @@ import (
 type Authorization interface {
 	CreateUser(ctx context.Context, user archive.User) (int64, error)
 	GenerateToken(ctx context.Context, username, password string) (string, error)
+	RefreshToken(ctx context.Context, accessToken string) (string, error)
 	ParseToken(ctx context.Context, token string) (int64, error)
 }
 

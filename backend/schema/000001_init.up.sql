@@ -1,4 +1,3 @@
--- Расширения
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS citext;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -15,7 +14,7 @@ BEGIN
 END
 $$;
 
--- Справочники и пользователи/роли
+-- === Справочники и пользователи/роли ===
 CREATE TABLE IF NOT EXISTS roles (id SMALLINT PRIMARY KEY, name TEXT NOT NULL UNIQUE);
 INSERT INTO roles (id,name) SELECT * FROM (VALUES (1,'administrator'),(2,'user')) v(id,name) ON CONFLICT DO NOTHING;
 
@@ -33,7 +32,7 @@ CREATE TABLE IF NOT EXISTS authors (id SERIAL PRIMARY KEY, full_name citext NOT 
 CREATE TABLE IF NOT EXISTS document_types (id SERIAL PRIMARY KEY, name citext NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS tags (id SERIAL PRIMARY KEY, name citext NOT NULL UNIQUE);
 
--- Документы и связанные сущности
+-- === Документы и связанные сущности ===
 CREATE TABLE IF NOT EXISTS documents (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
@@ -78,7 +77,7 @@ CREATE TABLE IF NOT EXISTS logs (
   changes JSONB
 );
 
--- Индексы (ключевые)
+-- === Индексы (ключевые) ===
 CREATE INDEX IF NOT EXISTS documents_title_idx         ON documents (lower(title));
 CREATE INDEX IF NOT EXISTS documents_title_trgm_idx    ON documents USING gin (lower(title) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS documents_created_at_idx    ON documents (created_at);
@@ -91,20 +90,31 @@ CREATE INDEX IF NOT EXISTS document_tags_tag_idx       ON document_tags (tag_id)
 CREATE INDEX IF NOT EXISTS document_permissions_user_idx ON document_permissions (user_id);
 CREATE INDEX IF NOT EXISTS logs_action_time_idx        ON logs (action_time);
 CREATE INDEX IF NOT EXISTS logs_user_id_idx            ON logs (user_id);
+-- полезный индекс по privacy для быстрых селектов публичных
+CREATE INDEX IF NOT EXISTS documents_privacy_idx ON documents (privacy);
 
--- ========== GEOJSON: валидация и заполнение geom ==========
+-- === GEOJSON: валидация и заполнение geom (более устойчиво, с попыткой MakeValid) ===
 CREATE OR REPLACE FUNCTION fn_validate_geojson(p_geojson JSONB) RETURNS BOOLEAN
 LANGUAGE plpgsql STABLE AS $$
 DECLARE g geometry;
-BEGIN
+begin
   IF p_geojson IS NULL THEN RETURN TRUE; END IF;
-  CASE lower(coalesce(p_geojson->>'type','')) 
+  CASE lower(coalesce(p_geojson->>'type',''))
     WHEN '' THEN RETURN FALSE;
     WHEN 'point','linestring','polygon','multipoint','multilinestring','multipolygon','geometrycollection' THEN
-      BEGIN g := ST_SetSRID(ST_GeomFromGeoJSON(p_geojson::text),4326); RETURN ST_IsValid(g); EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+      BEGIN
+        g := ST_SetSRID(ST_GeomFromGeoJSON(p_geojson::text),4326);
+        IF ST_IsValid(g) THEN RETURN TRUE; END IF;
+        -- пробуем сделать валидно
+        IF ST_IsValid(ST_MakeValid(g)) THEN RETURN TRUE; ELSE RETURN FALSE; END IF;
+      EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
     WHEN 'feature' THEN
       IF p_geojson->'geometry' IS NULL THEN RETURN FALSE; END IF;
-      BEGIN g := ST_SetSRID(ST_GeomFromGeoJSON((p_geojson->'geometry')::text),4326); RETURN ST_IsValid(g); EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+      BEGIN
+        g := ST_SetSRID(ST_GeomFromGeoJSON((p_geojson->'geometry')::text),4326);
+        IF ST_IsValid(g) THEN RETURN TRUE; END IF;
+        IF ST_IsValid(ST_MakeValid(g)) THEN RETURN TRUE; ELSE RETURN FALSE; END IF;
+      EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
     WHEN 'featurecollection' THEN
       IF p_geojson->'features' IS NULL OR jsonb_typeof(p_geojson->'features') <> 'array' THEN RETURN FALSE; END IF;
       BEGIN
@@ -112,24 +122,46 @@ BEGIN
           SELECT ST_SetSRID(ST_GeomFromGeoJSON((f->'geometry')::text),4326)
           FROM jsonb_array_elements(p_geojson->'features') AS arr(f)
         )));
-      EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+      EXCEPTION WHEN OTHERS THEN
+        -- пытаемся проверить с MakeValid
+        BEGIN
+          RETURN ST_IsValid(ST_MakeValid(ST_Collect(ARRAY(
+            SELECT ST_SetSRID(ST_GeomFromGeoJSON((f->'geometry')::text),4326)
+            FROM jsonb_array_elements(p_geojson->'features') AS arr(f)
+          ))));
+        EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+      END;
     ELSE RETURN FALSE;
   END CASE;
 END;
 $$;
 
 CREATE OR REPLACE FUNCTION trg_documents_validate_and_fill_geom() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE g geometry;
 BEGIN
   IF NEW.geojson IS NULL THEN NEW.geom := NULL; RETURN NEW; END IF;
   IF NOT fn_validate_geojson(NEW.geojson) THEN RAISE EXCEPTION 'Invalid GeoJSON for document %', COALESCE(NEW.title,'unknown'); END IF;
   BEGIN
-    NEW.geom := ST_SetSRID(ST_GeomFromGeoJSON(NEW.geojson::text),4326);
+    g := ST_SetSRID(ST_GeomFromGeoJSON(NEW.geojson::text),4326);
+    IF NOT ST_IsValid(g) THEN
+      g := ST_MakeValid(g);
+    END IF;
+    NEW.geom := g;
   EXCEPTION WHEN OTHERS THEN
+    -- При ошибке пробуем разные варианты (feature / featurecollection)
     IF lower(coalesce(NEW.geojson->>'type',''))='feature' THEN
-      BEGIN NEW.geom := ST_SetSRID(ST_GeomFromGeoJSON((NEW.geojson->'geometry')::text),4326); EXCEPTION WHEN OTHERS THEN NEW.geom := NULL; END;
+      BEGIN
+        g := ST_SetSRID(ST_GeomFromGeoJSON((NEW.geojson->'geometry')::text),4326);
+        IF NOT ST_IsValid(g) THEN g := ST_MakeValid(g); END IF;
+        NEW.geom := g;
+      EXCEPTION WHEN OTHERS THEN NEW.geom := NULL; END;
     ELSIF lower(coalesce(NEW.geojson->>'type',''))='featurecollection' THEN
-      BEGIN NEW.geom := (SELECT ST_Collect(array_agg(g)) FROM (SELECT ST_SetSRID(ST_GeomFromGeoJSON((f->'geometry')::text),4326) AS g FROM jsonb_array_elements(NEW.geojson->'features') AS arr(f)) s); EXCEPTION WHEN OTHERS THEN NEW.geom := NULL; END;
-    ELSE NEW.geom := NULL;
+      BEGIN
+        NEW.geom := (SELECT ST_Collect(array_agg(g)) FROM (SELECT ST_SetSRID(ST_GeomFromGeoJSON((f->'geometry')::text),4326) AS g FROM jsonb_array_elements(NEW.geojson->'features') AS arr(f)) s);
+        IF NEW.geom IS NOT NULL AND NOT ST_IsValid(NEW.geom) THEN NEW.geom := ST_MakeValid(NEW.geom); END IF;
+      EXCEPTION WHEN OTHERS THEN NEW.geom := NULL; END;
+    ELSE
+      NEW.geom := NULL;
     END IF;
   END;
   RETURN NEW;
@@ -139,21 +171,25 @@ $$;
 DROP TRIGGER IF EXISTS trg_documents_validate_and_fill_geom ON documents;
 CREATE TRIGGER trg_documents_validate_and_fill_geom BEFORE INSERT OR UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION trg_documents_validate_and_fill_geom();
 
--- ========== Внутренние: get_or_create и очистка ==========
+-- === Внутренние: get_or_create и очистка (UPSERT с RETURNING) ===
 CREATE OR REPLACE FUNCTION _internal_get_or_create_author(p_name TEXT) RETURNS INTEGER LANGUAGE plpgsql AS $$
-DECLARE v TEXT := btrim(p_name);
+DECLARE v TEXT := btrim(p_name); r INT;
 BEGIN
   IF v IS NULL OR v = '' THEN RETURN NULL; END IF;
-  INSERT INTO authors (full_name) VALUES (v) ON CONFLICT (full_name) DO NOTHING;
-  RETURN (SELECT id FROM authors WHERE full_name = v);
+  INSERT INTO authors (full_name) VALUES (v)
+    ON CONFLICT (full_name) DO UPDATE SET full_name = EXCLUDED.full_name
+    RETURNING id INTO r;
+  RETURN r;
 END; $$;
 
 CREATE OR REPLACE FUNCTION _internal_get_or_create_tag(p_name TEXT) RETURNS INTEGER LANGUAGE plpgsql AS $$
-DECLARE v TEXT := btrim(p_name);
+DECLARE v TEXT := btrim(p_name); r INT;
 BEGIN
   IF v IS NULL OR v = '' THEN RETURN NULL; END IF;
-  INSERT INTO tags (name) VALUES (v) ON CONFLICT (name) DO NOTHING;
-  RETURN (SELECT id FROM tags WHERE name = v);
+  INSERT INTO tags (name) VALUES (v)
+    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id INTO r;
+  RETURN r;
 END; $$;
 
 CREATE OR REPLACE FUNCTION _internal_attach_tag_to_document(p_document_id INT, p_tag_name TEXT) RETURNS VOID LANGUAGE plpgsql AS $$
@@ -194,7 +230,7 @@ BEGIN
 END;
 $$;
 
--- ========== Логирование (маска password_hash/file_bytea) ==========
+-- === Логирование (маска password_hash/file_bytea). Теперь использует current_setting с безопасным флагом ===
 CREATE OR REPLACE FUNCTION fn_log_changes() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
   v_user_id INTEGER;
@@ -202,7 +238,7 @@ DECLARE
   v_new JSONB;
   v_old JSONB;
   v_tg_op TEXT := TG_OP;
-  v_session_of_user TEXT := session_of_user; -- встроенная переменная
+  v_session_of_user TEXT := current_setting('app.session_of_user', true);
 BEGIN
   -- попытка определить пользователя из created_by/updated_by, иначе current_user
   IF TG_OP = 'INSERT' THEN v_user_id := COALESCE(NEW.updated_by, NEW.created_by);
@@ -230,6 +266,11 @@ BEGIN
   END IF;
 END; $$;
 
+-- Навесим триггер логирования на documents (и при желании на другие таблицы)
+DROP TRIGGER IF EXISTS trg_log_changes_documents ON documents;
+CREATE TRIGGER trg_log_changes_documents AFTER INSERT OR UPDATE OR DELETE ON documents
+  FOR EACH ROW EXECUTE FUNCTION fn_log_changes();
+
 -- Очистка после удаления документа
 CREATE OR REPLACE FUNCTION trg_after_delete_document_cleanup() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -240,7 +281,7 @@ END; $$;
 DROP TRIGGER IF EXISTS trg_after_delete_document_cleanup ON documents;
 CREATE TRIGGER trg_after_delete_document_cleanup AFTER DELETE ON documents FOR EACH ROW EXECUTE FUNCTION trg_after_delete_document_cleanup();
 
--- ========== SECURITY-FUNCTIONS (SECURITY DEFINER + search_path) ==========
+-- === SECURITY-FUNCTIONS (SECURITY DEFINER + search_path) ===
 CREATE OR REPLACE FUNCTION fn_register_user(
   p_login TEXT,
   p_password TEXT,
@@ -310,53 +351,117 @@ BEGIN
   RETURN v_perm;
 END; $$;
 
--- ========== CRUD для документов ==========
+-- === CRUD для документов
 CREATE OR REPLACE FUNCTION fn_add_document(
-  p_user_id INT, p_title TEXT, p_document_date DATE,
-  p_author_id INT DEFAULT NULL, p_author_name TEXT DEFAULT NULL,
-  p_type_id INT DEFAULT NULL, p_file BYTEA DEFAULT NULL,
-  p_geojson JSONB DEFAULT NULL, p_tags TEXT[] DEFAULT NULL,
-  p_privacy TEXT DEFAULT 'public'
-) RETURNS INT SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-DECLARE new_id INT; a_id INT := p_author_id; t TEXT;
+  p_user_id INT,
+  p_title TEXT,
+  p_document_date DATE,
+  p_author_id INT,
+  p_author_name TEXT,
+  p_type_id INT,
+  p_file BYTEA,
+  p_geojson JSONB,
+  p_tags TEXT[],
+  p_privacy TEXT
+) RETURNS INT
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  new_id INT;
+  a_id INT := p_author_id;
+  t TEXT;
 BEGIN
+  -- Обязательные проверки
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'p_user_id is required'; END IF;
-  IF a_id IS NULL AND p_author_name IS NOT NULL THEN a_id := _internal_get_or_create_author(p_author_name); END IF;
-  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author_id, type_id, file_bytea, geojson)
-  VALUES (p_title, p_privacy::privacy_type, now(), p_user_id, p_document_date, a_id, p_type_id, p_file, p_geojson) RETURNING id INTO new_id;
-
-  IF p_tags IS NOT NULL THEN
-    FOREACH t IN ARRAY p_tags LOOP PERFORM _internal_attach_tag_to_document(new_id, t); END LOOP;
+  IF p_title IS NULL THEN RAISE EXCEPTION 'p_title is required'; END IF;
+  IF p_privacy IS NULL OR lower(p_privacy) NOT IN ('public','private') THEN
+    RAISE EXCEPTION 'p_privacy must be one of public/private';
   END IF;
+
+  IF a_id IS NULL AND p_author_name IS NOT NULL THEN
+    a_id := _internal_get_or_create_author(p_author_name);
+  END IF;
+
+  -- Вставка документа (atomic в рамках функции)
+  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author_id, type_id, file_bytea, geojson)
+  VALUES (p_title, p_privacy::privacy_type, now(), p_user_id, p_document_date, a_id, p_type_id, p_file, p_geojson)
+  RETURNING id INTO new_id;
+
+  -- Теги: убираем дубликаты, создаём и привязываем
+  IF p_tags IS NOT NULL THEN
+    FOR t IN SELECT DISTINCT btrim(tag) FROM unnest(p_tags) tag WHERE btrim(tag) <> '' LOOP
+      PERFORM _internal_attach_tag_to_document(new_id, t);
+    END LOOP;
+  END IF;
+
   RETURN new_id;
-END; $$;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION fn_update_document(
-  p_document_id INT, p_user_id INT, p_title TEXT, p_document_date DATE,
-  p_author_id INT DEFAULT NULL, p_author_name TEXT DEFAULT NULL,
-  p_type_id INT DEFAULT NULL, p_file BYTEA DEFAULT NULL,
-  p_geojson JSONB DEFAULT NULL, p_tags TEXT[] DEFAULT NULL, p_privacy TEXT DEFAULT NULL
-) RETURNS VOID SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-DECLARE a_id INT := p_author_id; t TEXT;
+  p_document_id INT,
+  p_user_id INT,
+  p_title TEXT,
+  p_document_date DATE,
+  p_author_id INT,
+  p_author_name TEXT,
+  p_type_id INT,
+  p_file BYTEA,
+  p_geojson JSONB,
+  p_tags TEXT[],
+  p_privacy TEXT
+) RETURNS VOID
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  a_id INT := p_author_id;
+  t TEXT;
+  v_exists BOOLEAN;
 BEGIN
+  -- Обязательные проверки
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'p_user_id is required'; END IF;
-  IF NOT _can_user_edit_document(p_user_id, p_document_id) THEN RAISE EXCEPTION 'No permission'; END IF;
-  IF a_id IS NULL AND p_author_name IS NOT NULL THEN a_id := _internal_get_or_create_author(p_author_name); END IF;
+  IF p_document_id IS NULL THEN RAISE EXCEPTION 'p_document_id is required'; END IF;
+  IF p_title IS NULL THEN RAISE EXCEPTION 'p_title is required'; END IF;
+  IF p_privacy IS NULL OR lower(p_privacy) NOT IN ('public','private') THEN
+    RAISE EXCEPTION 'p_privacy must be one of public/private';
+  END IF;
 
+  IF NOT _can_user_edit_document(p_user_id, p_document_id) THEN
+    RAISE EXCEPTION 'No permission';
+  END IF;
+
+  -- проверим существование
+  SELECT EXISTS (SELECT 1 FROM documents WHERE id = p_document_id) INTO v_exists;
+  IF NOT v_exists THEN RAISE EXCEPTION 'Document % does not exist', p_document_id; END IF;
+
+  IF a_id IS NULL AND p_author_name IS NOT NULL THEN
+    a_id := _internal_get_or_create_author(p_author_name);
+  END IF;
+
+  -- Обновляем запись
   UPDATE documents SET
-    title = p_title, document_date = p_document_date, author_id = a_id, type_id = p_type_id,
-    file_bytea = p_file, geojson = p_geojson,
-    privacy = COALESCE(p_privacy, privacy)::privacy_type,
-    updated_at = now(), updated_by = p_user_id
+    title = p_title,
+    document_date = p_document_date,
+    author_id = a_id,
+    type_id = p_type_id,
+    file_bytea = p_file,
+    geojson = p_geojson,
+    privacy = p_privacy::privacy_type,
+    updated_at = now(),
+    updated_by = p_user_id
   WHERE id = p_document_id;
 
+  -- Теги: если передан NULL — не трогаем; если передан массив (включая пустой) — заменяем
   IF p_tags IS NOT NULL THEN
     DELETE FROM document_tags WHERE document_id = p_document_id;
-    IF COALESCE(array_length(p_tags,1),0) > 0 THEN
-      FOREACH t IN ARRAY p_tags LOOP PERFORM _internal_attach_tag_to_document(p_document_id, t); END LOOP;
-    END IF;
+    FOR t IN SELECT DISTINCT btrim(tag) FROM unnest(p_tags) tag WHERE btrim(tag) <> '' LOOP
+      PERFORM _internal_attach_tag_to_document(p_document_id, t);
+    END LOOP;
   END IF;
-END; $$;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION fn_delete_document(p_document_id INT, p_user_id INT) RETURNS VOID SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
 BEGIN
@@ -365,7 +470,7 @@ BEGIN
   DELETE FROM documents WHERE id = p_document_id;
 END; $$;
 
--- ========== Управление правами (только админ) ==========
+-- === Управление правами (только админ) ===
 CREATE OR REPLACE FUNCTION fn_set_document_permission(p_document_id INT, p_user_id INT, p_target_user_id INT, p_can_view BOOLEAN, p_can_edit BOOLEAN)
 RETURNS VOID SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
 BEGIN
@@ -382,86 +487,123 @@ BEGIN
   DELETE FROM document_permissions WHERE document_id = p_document_id AND user_id = p_target_user_id;
 END; $$;
 
--- ========== Поиск документов по тегу с проверкой прав (упрощённый экспорт) ==========
-CREATE OR REPLACE FUNCTION fn_get_documents_by_tag_secure(
-  p_tag_name TEXT, p_author_name TEXT DEFAULT NULL, p_type_name TEXT DEFAULT NULL,
-  p_date_from DATE DEFAULT NULL, p_date_to DATE DEFAULT NULL, p_requester_id INT DEFAULT NULL
-) RETURNS TABLE (
-  doc_id INT, title TEXT, privacy privacy_type, created_at TIMESTAMPTZ, created_by INT,
-  created_by_login TEXT, created_by_full_name TEXT, updated_at TIMESTAMPTZ, updated_by INT,
-  updated_by_login TEXT, updated_by_full_name TEXT, document_date DATE, author_id INT, author_name TEXT,
-  type_id INT, type_name TEXT, tags TEXT[], viewers INT[], editors INT[], can_requester_edit BOOLEAN, geom geometry(Geometry,4326)
-) SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-DECLARE v_role TEXT; v_tag TEXT := btrim(p_tag_name); v_uid INT := p_requester_id;
+-- === Получение документов для пользователя ===
+CREATE OR REPLACE FUNCTION fn_get_documents_for_user(p_requester_id INT)
+RETURNS TABLE (
+  id INT,
+  title TEXT,
+  privacy privacy_type,
+  updated_at TIMESTAMPTZ,
+  document_date DATE,
+  type_id INT,
+  author_id INT,
+  geojson JSONB,
+  can_edit BOOLEAN,
+  is_author BOOLEAN
+)
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_role TEXT;
+  v_uid INT := p_requester_id;
 BEGIN
-  IF v_tag IS NULL OR v_tag = '' THEN RAISE EXCEPTION 'p_tag_name must be provided'; END IF;
-  IF v_uid IS NOT NULL THEN SELECT r.name INTO v_role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = v_uid; END IF;
+  IF v_uid IS NOT NULL THEN
+    SELECT r.name INTO v_role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = v_uid;
+  END IF;
 
-  RETURN QUERY WITH tt AS (SELECT id FROM tags WHERE lower(name)=lower(v_tag))
-  SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, cu.login, cu.full_name,
-        d.updated_at, d.updated_by, ud.login, ud.full_name, d.document_date,
-        d.author_id, a.full_name, d.type_id, t.name,
-        COALESCE((SELECT array_agg(DISTINCT tg ORDER BY tg) FROM (SELECT t2.name AS tg FROM document_tags dt2 JOIN tags t2 ON t2.id = dt2.tag_id WHERE dt2.document_id = d.id) s), ARRAY[]::text[]),
-        COALESCE((SELECT array_agg(user_id) FROM document_permissions WHERE document_id = d.id AND can_view), ARRAY[]::int[]),
-        COALESCE((SELECT array_agg(user_id) FROM document_permissions WHERE document_id = d.id AND can_edit), ARRAY[]::int[]),
-        (CASE WHEN v_role='administrator' OR (v_uid IS NOT NULL AND d.created_by = v_uid) OR (v_uid IS NOT NULL AND EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND dp.user_id=v_uid AND dp.can_edit)) THEN TRUE ELSE FALSE END),
-        d.geom
+  RETURN QUERY
+  SELECT
+    d.id,
+    d.title,
+    d.privacy,
+    d.updated_at,
+    d.document_date,
+    d.type_id,
+    d.author_id,
+    d.geojson,
+    (CASE WHEN v_role = 'administrator' THEN TRUE
+          WHEN v_uid IS NOT NULL AND d.created_by = v_uid THEN TRUE
+          WHEN v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_edit) THEN TRUE
+          ELSE FALSE END) AS can_edit,
+    (d.created_by IS NOT NULL AND v_uid IS NOT NULL AND d.created_by = v_uid) AS is_author
   FROM documents d
-  JOIN document_tags dt ON dt.document_id = d.id
-  JOIN tt ON tt.id = dt.tag_id
-  LEFT JOIN authors a ON a.id = d.author_id
-  LEFT JOIN document_types t ON t.id = d.type_id
-  LEFT JOIN users cu ON cu.id = d.created_by
-  LEFT JOIN users ud ON ud.id = d.updated_by
-  WHERE (v_role='administrator' OR d.privacy='public' OR (v_uid IS NOT NULL AND d.created_by = v_uid) OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_view)))
-    AND (p_author_name IS NULL OR EXISTS (SELECT 1 FROM authors a2 WHERE a2.id = d.author_id AND lower(a2.full_name)=lower(btrim(p_author_name))))
-    AND (p_type_name IS NULL OR EXISTS (SELECT 1 FROM document_types t2 WHERE t2.id = d.type_id AND lower(t2.name)=lower(btrim(p_type_name))))
-    AND (p_date_from IS NULL OR d.document_date >= p_date_from)
-    AND (p_date_to   IS NULL OR d.document_date <= p_date_to)
+  WHERE
+    (v_role = 'administrator')
+    OR d.privacy = 'public'
+    OR (v_uid IS NOT NULL AND d.created_by = v_uid)
+    OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND (dp.can_view OR dp.can_edit)))
   ORDER BY d.created_at DESC;
-END; $$;
+END;
+$$;
 
--- ========== Получение одного документа с проверкой прав ==========
-CREATE OR REPLACE FUNCTION fn_get_document_secure(p_document_id INT, p_requester_id INT DEFAULT NULL)
-RETURNS TABLE (id INT, title TEXT, privacy privacy_type, created_at TIMESTAMPTZ, created_by INT, updated_at TIMESTAMPTZ, updated_by INT, document_date DATE, author_id INT, type_id INT, geojson JSONB)
-SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-DECLARE v_role TEXT; v_uid INT := p_requester_id; allowed BOOLEAN;
+-- === Получение полного представления одного документа (с проверкой прав) ===
+CREATE OR REPLACE FUNCTION fn_get_document_by_id(p_document_id INT, p_requester_id INT DEFAULT NULL)
+RETURNS TABLE (
+  id INT,
+  title TEXT,
+  privacy privacy_type,
+  created_at TIMESTAMPTZ,
+  created_by INT,
+  updated_at TIMESTAMPTZ,
+  updated_by INT,
+  document_date DATE,
+  author_id INT,
+  type_id INT,
+  file_bytea BYTEA,
+  geojson JSONB,
+  geom geometry(Geometry,4326),
+  can_edit BOOLEAN
+)
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_role TEXT;
+  v_uid INT := p_requester_id;
+  allowed BOOLEAN;
 BEGIN
-  IF v_uid IS NOT NULL THEN SELECT r.name INTO v_role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = v_uid; END IF;
-  IF v_role='administrator' THEN RETURN QUERY SELECT id,title,privacy,created_at,created_by,updated_at,updated_by,document_date,author_id,type_id,geojson FROM documents WHERE id = p_document_id; RETURN; END IF;
+  IF v_uid IS NOT NULL THEN
+    SELECT r.name INTO v_role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = v_uid;
+  END IF;
+
+  IF v_role = 'administrator' THEN
+    RETURN QUERY
+      SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
+             d.document_date, d.author_id, d.type_id, d.file_bytea, d.geojson, d.geom,
+             TRUE AS can_edit
+      FROM documents d
+      WHERE d.id = p_document_id;
+    RETURN;
+  END IF;
 
   SELECT EXISTS (
     SELECT 1 FROM documents d
-    WHERE d.id = p_document_id AND (d.privacy='public' OR (v_uid IS NOT NULL AND d.created_by = v_uid) OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND dp.user_id=v_uid AND dp.can_view)))
+    WHERE d.id = p_document_id
+      AND (
+        d.privacy = 'public'
+        OR (v_uid IS NOT NULL AND d.created_by = v_uid)
+        OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_view))
+      )
   ) INTO allowed;
 
-  IF NOT allowed THEN RAISE EXCEPTION 'User % has no permission to view document %', v_uid, p_document_id; END IF;
-  RETURN QUERY SELECT id,title,privacy,created_at,created_by,updated_at,updated_by,document_date,author_id,type_id,geojson FROM documents WHERE id = p_document_id;
-END; $$;
+  IF NOT allowed THEN
+    RAISE EXCEPTION 'User % has no permission to view document %', v_uid, p_document_id;
+  END IF;
 
--- ========== Логи: получение (только админ) ==========
-CREATE OR REPLACE FUNCTION fn_get_logs_by_user(p_requester_id INT, p_user_id_target INT, p_start TIMESTAMPTZ DEFAULT NULL, p_end TIMESTAMPTZ DEFAULT NULL)
-RETURNS SETOF logs SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-BEGIN
-  IF NOT is_user_admin(p_requester_id) THEN RAISE EXCEPTION 'Only administrator can access logs'; END IF;
-  RETURN QUERY SELECT * FROM logs WHERE user_id = p_user_id_target AND (p_start IS NULL OR action_time >= p_start) AND (p_end IS NULL OR action_time <= p_end) ORDER BY action_time DESC;
-END; $$;
+  RETURN QUERY
+    SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
+           d.document_date, d.author_id, d.type_id, d.file_bytea, d.geojson, d.geom,
+           (CASE WHEN v_role = 'administrator' THEN TRUE
+                 WHEN v_uid IS NOT NULL AND d.created_by = v_uid THEN TRUE
+                 WHEN v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_edit) THEN TRUE
+                 ELSE FALSE END) AS can_edit
+    FROM documents d
+    WHERE d.id = p_document_id;
+END;
+$$;
 
-CREATE OR REPLACE FUNCTION fn_get_logs_by_table(p_requester_id INT, p_table_name TEXT, p_start TIMESTAMPTZ DEFAULT NULL, p_end TIMESTAMPTZ DEFAULT NULL) RETURNS SETOF logs
-SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-BEGIN
-  IF NOT is_user_admin(p_requester_id) THEN RAISE EXCEPTION 'Only administrator can access logs'; END IF;
-  RETURN QUERY SELECT * FROM logs WHERE table_name = p_table_name AND (p_start IS NULL OR action_time >= p_start) AND (p_end IS NULL OR action_time <= p_end) ORDER BY action_time DESC;
-END; $$;
-
-CREATE OR REPLACE FUNCTION fn_get_logs_by_date(p_requester_id INT, p_start TIMESTAMPTZ, p_end TIMESTAMPTZ) RETURNS SETOF logs
-SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
-BEGIN
-  IF NOT is_user_admin(p_requester_id) THEN RAISE EXCEPTION 'Only administrator can access logs'; END IF;
-  RETURN QUERY SELECT * FROM logs WHERE action_time >= p_start AND action_time <= p_end ORDER BY action_time DESC;
-END; $$;
-
--- ========== Периодическая очистка ==========
+-- === Периодическая очистка ===
 CREATE OR REPLACE FUNCTION fn_periodic_cleanup() RETURNS JSONB
 SECURITY DEFINER
 SET search_path = public, pg_temp

@@ -3,6 +3,7 @@ package handler
 import (
 	"archive"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -61,4 +62,30 @@ func (h *Handler) signIn(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, map[string]interface{}{"token": token})
+}
+func (h *Handler) refreshToken(c *gin.Context) {
+	header := c.GetHeader("Authorization")
+	if header == "" {
+		newErrorResponse(c, http.StatusBadRequest, "empty auth header")
+		return
+	}
+	parts := strings.Split(header, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		newErrorResponse(c, http.StatusBadRequest, "invalid auth header")
+		return
+	}
+	oldToken := parts[1]
+	if oldToken == "" {
+		newErrorResponse(c, http.StatusBadRequest, "token is empty")
+		return
+	}
+
+	newToken, err := h.services.Authorization.RefreshToken(c.Request.Context(), oldToken)
+	if err != nil {
+		// если токен просрочен или неверен — вернуть 401
+		newErrorResponse(c, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, map[string]interface{}{"token": newToken})
 }

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"archive"
 
@@ -18,21 +19,29 @@ func NewDocumentTypesPostgres(db *sqlx.DB) *DocumentTypesPostgres {
 }
 
 func (r *DocumentTypesPostgres) CreateDocumentType(ctx context.Context, t archive.DocumentType) (int64, error) {
+	name := strings.TrimSpace(t.Name)
+	if name == "" {
+		return 0, fmt.Errorf("document type name is required")
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
+
 	ins := fmt.Sprintf(`INSERT INTO %s (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, documentTypesTable)
-	if _, err := tx.ExecContext(ctx, ins, t.Name); err != nil {
+	if _, err := tx.ExecContext(ctx, ins, name); err != nil {
 		_ = tx.Rollback()
 		return 0, err
 	}
+
 	var id int64
 	sel := fmt.Sprintf(`SELECT id FROM %s WHERE name = $1`, documentTypesTable)
-	if err := tx.GetContext(ctx, &id, sel, t.Name); err != nil {
+	if err := tx.GetContext(ctx, &id, sel, name); err != nil {
 		_ = tx.Rollback()
 		return 0, err
 	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -51,13 +60,19 @@ func (r *DocumentTypesPostgres) GetAllDocumentTypes(ctx context.Context) ([]arch
 func (r *DocumentTypesPostgres) GetDocumentType(ctx context.Context, id int64) (archive.DocumentType, error) {
 	var t archive.DocumentType
 	q := fmt.Sprintf(`SELECT id, name FROM %s WHERE id = $1`, documentTypesTable)
-	err := r.db.GetContext(ctx, &t, q, id)
-	return t, err
+	if err := r.db.GetContext(ctx, &t, q, id); err != nil {
+		return archive.DocumentType{}, err
+	}
+	return t, nil
 }
 
 func (r *DocumentTypesPostgres) UpdateDocumentType(ctx context.Context, id int64, t archive.DocumentType) error {
+	name := strings.TrimSpace(t.Name)
+	if name == "" {
+		return fmt.Errorf("document type name is required")
+	}
 	q := fmt.Sprintf(`UPDATE %s SET name = $1 WHERE id = $2`, documentTypesTable)
-	_, err := r.db.ExecContext(ctx, q, t.Name, id)
+	_, err := r.db.ExecContext(ctx, q, name, id)
 	return err
 }
 

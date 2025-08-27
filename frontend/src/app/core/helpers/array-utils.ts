@@ -32,3 +32,19 @@ export function arrayIncludesWith<T>(arr: T[], value: T, comparator: (a: T, b: T
 
   return false;
 }
+
+export function uniqWith<T>(items: T[], equalBy: (a: T, b: T) => boolean): T[] {
+  const result: T[] = [];
+  if (items.length === 0) return result;
+
+  let val: T = items[0];
+  result.push(val);
+
+  for (let i = 1; i < items.length; i++) {
+    val = items[i];
+    if (!arrayIncludesWith(result, val, equalBy)) {
+      result.push(val);
+    }
+  }
+  return result;
+}

@@ -1,5 +1,5 @@
 // theme.service.ts
-import { Inject, Injectable, PLATFORM_ID, effect } from '@angular/core';
+import { Inject, Injectable, effect } from '@angular/core';
 import { DOCUMENT, isPlatformBrowser } from '@angular/common';
 import { Renderer2, RendererFactory2 } from '@angular/core';
 import { signal, Signal } from '@angular/core';
@@ -17,11 +17,10 @@ export class ThemeService {
 
   constructor(
     @Inject(DOCUMENT) private document: Document,
-    @Inject(PLATFORM_ID) private platformId: Object,
     rendererFactory: RendererFactory2
   ) {
     this.renderer = rendererFactory.createRenderer(null, null);
-    this.storageAvailable = isPlatformBrowser(this.platformId) && typeof window?.localStorage !== 'undefined';
+    this.storageAvailable = typeof window?.localStorage !== 'undefined';
     this.initialize();
   }
 

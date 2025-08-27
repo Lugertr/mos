@@ -4,7 +4,8 @@
 
 .navbar-content {
   margin: auto;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
@@ -13,7 +14,21 @@
 }
 
 mat-toolbar {
-  position: sticky;
-  top: 0;
+  color: var(--mat-sys-primary);
+  background: var(--mat-sys-primary-container);
   z-index: 1000;
+}
+
+.navbar-content-list {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+mat-toolbar .mdc-button, mat-toolbar .mdc-icon-button {
+  color: inherit;
+}
+
+.active-link {
+  background: color-mix(in srgb, var(--mat-sys-primary) 10%, transparent);
 }
