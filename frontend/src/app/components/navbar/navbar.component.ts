@@ -52,7 +52,7 @@ export class NavbarComponent {
 
   signOut(): void {
     this.auth.clearToken();
-    this.router.navigateByUrl(PathWithSlash(RoutesPath.Dashboard));
+    this.router.navigateByUrl(PathWithSlash(RoutesPath.SignIn));
   }
 
   menuToggleClick(): void {

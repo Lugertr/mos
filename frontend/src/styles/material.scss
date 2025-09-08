@@ -22,3 +22,33 @@ body {
 body.dark {
   color-scheme: dark;
 }
+
+body .mat-mdc-table {
+  background-color: inherit;
+
+  .mat-mdc-row.hover {
+    &:hover {
+      cursor: pointer;
+      background-color: var(--mat-sys-inverse-primary);
+    }
+  }
+}
+
+body {
+  .no-bottom-space {
+    .mat-mdc-form-field-subscript-wrapper {
+      display: none;
+    }
+  }
+}
+
+body {
+
+  .primary {
+    color: var(--mat-sys-primary);
+  }
+
+  .warn {
+    color: var(----mat-sys-error);
+  }
+}

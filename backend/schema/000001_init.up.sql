@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS users (
   CONSTRAINT users_login_not_blank CHECK (btrim(login::text) <> '')
 );
 
-CREATE TABLE IF NOT EXISTS authors (id SERIAL PRIMARY KEY, full_name citext NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS document_types (id SERIAL PRIMARY KEY, name citext NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS tags (id SERIAL PRIMARY KEY, name citext NOT NULL UNIQUE);
 
@@ -42,7 +41,7 @@ CREATE TABLE IF NOT EXISTS documents (
   updated_at TIMESTAMPTZ,
   updated_by INTEGER REFERENCES users(id),
   document_date DATE,
-  author_id INTEGER REFERENCES authors(id),
+  author citext, -- теперь хранится имя автора как текст
   type_id INTEGER REFERENCES document_types(id),
   file_bytea BYTEA,
   geojson JSONB,
@@ -84,7 +83,6 @@ CREATE INDEX IF NOT EXISTS documents_created_at_idx    ON documents (created_at)
 CREATE INDEX IF NOT EXISTS documents_document_date_idx ON documents (document_date);
 CREATE INDEX IF NOT EXISTS documents_geom_gist         ON documents USING GIST (geom);
 CREATE INDEX IF NOT EXISTS tags_name_lower_idx         ON tags (lower(name));
-CREATE INDEX IF NOT EXISTS authors_name_lower_idx      ON authors (lower(full_name));
 CREATE INDEX IF NOT EXISTS doc_types_name_idx          ON document_types (lower(name));
 CREATE INDEX IF NOT EXISTS document_tags_tag_idx       ON document_tags (tag_id);
 CREATE INDEX IF NOT EXISTS document_permissions_user_idx ON document_permissions (user_id);
@@ -92,6 +90,9 @@ CREATE INDEX IF NOT EXISTS logs_action_time_idx        ON logs (action_time);
 CREATE INDEX IF NOT EXISTS logs_user_id_idx            ON logs (user_id);
 -- полезный индекс по privacy для быстрых селектов публичных
 CREATE INDEX IF NOT EXISTS documents_privacy_idx ON documents (privacy);
+
+-- индекс для поиска по author
+CREATE INDEX IF NOT EXISTS documents_author_lower_idx ON documents (lower(author));
 
 -- === GEOJSON: валидация и заполнение geom (более устойчиво, с попыткой MakeValid) ===
 CREATE OR REPLACE FUNCTION fn_validate_geojson(p_geojson JSONB) RETURNS BOOLEAN
@@ -171,17 +172,6 @@ $$;
 DROP TRIGGER IF EXISTS trg_documents_validate_and_fill_geom ON documents;
 CREATE TRIGGER trg_documents_validate_and_fill_geom BEFORE INSERT OR UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION trg_documents_validate_and_fill_geom();
 
--- === Внутренние: get_or_create и очистка (UPSERT с RETURNING) ===
-CREATE OR REPLACE FUNCTION _internal_get_or_create_author(p_name TEXT) RETURNS INTEGER LANGUAGE plpgsql AS $$
-DECLARE v TEXT := btrim(p_name); r INT;
-BEGIN
-  IF v IS NULL OR v = '' THEN RETURN NULL; END IF;
-  INSERT INTO authors (full_name) VALUES (v)
-    ON CONFLICT (full_name) DO UPDATE SET full_name = EXCLUDED.full_name
-    RETURNING id INTO r;
-  RETURN r;
-END; $$;
-
 CREATE OR REPLACE FUNCTION _internal_get_or_create_tag(p_name TEXT) RETURNS INTEGER LANGUAGE plpgsql AS $$
 DECLARE v TEXT := btrim(p_name); r INT;
 BEGIN
@@ -208,21 +198,6 @@ BEGIN
   DELETE FROM tags t
   WHERE NOT EXISTS (
     SELECT 1 FROM document_tags dt WHERE dt.tag_id = t.id
-  );
-
-  GET DIAGNOSTICS v_deleted := ROW_COUNT;
-  RETURN v_deleted;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION _internal_cleanup_unused_authors() RETURNS INTEGER
-LANGUAGE plpgsql AS $$
-DECLARE
-  v_deleted INT := 0;
-BEGIN
-  DELETE FROM authors a
-  WHERE NOT EXISTS (
-    SELECT 1 FROM documents d WHERE d.author_id = a.id
   );
 
   GET DIAGNOSTICS v_deleted := ROW_COUNT;
@@ -271,11 +246,9 @@ DROP TRIGGER IF EXISTS trg_log_changes_documents ON documents;
 CREATE TRIGGER trg_log_changes_documents AFTER INSERT OR UPDATE OR DELETE ON documents
   FOR EACH ROW EXECUTE FUNCTION fn_log_changes();
 
--- Очистка после удаления документа
 CREATE OR REPLACE FUNCTION trg_after_delete_document_cleanup() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM _internal_cleanup_unused_tags();
-  PERFORM _internal_cleanup_unused_authors();
   RETURN OLD;
 END; $$;
 DROP TRIGGER IF EXISTS trg_after_delete_document_cleanup ON documents;
@@ -356,8 +329,7 @@ CREATE OR REPLACE FUNCTION fn_add_document(
   p_user_id INT,
   p_title TEXT,
   p_document_date DATE,
-  p_author_id INT,
-  p_author_name TEXT,
+  p_author TEXT,     
   p_type_id INT,
   p_file BYTEA,
   p_geojson JSONB,
@@ -369,7 +341,7 @@ SET search_path = public, pg_temp
 LANGUAGE plpgsql AS $$
 DECLARE
   new_id INT;
-  a_id INT := p_author_id;
+  a_name citext := NULL;
   t TEXT;
 BEGIN
   -- Обязательные проверки
@@ -379,13 +351,13 @@ BEGIN
     RAISE EXCEPTION 'p_privacy must be one of public/private';
   END IF;
 
-  IF a_id IS NULL AND p_author_name IS NOT NULL THEN
-    a_id := _internal_get_or_create_author(p_author_name);
+  IF p_author IS NOT NULL AND btrim(p_author) <> '' THEN
+    a_name := p_author::citext;
   END IF;
 
   -- Вставка документа (atomic в рамках функции)
-  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author_id, type_id, file_bytea, geojson)
-  VALUES (p_title, p_privacy::privacy_type, now(), p_user_id, p_document_date, a_id, p_type_id, p_file, p_geojson)
+  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author, type_id, file_bytea, geojson)
+  VALUES (p_title, p_privacy::privacy_type, now(), p_user_id, p_document_date, a_name, p_type_id, p_file, p_geojson)
   RETURNING id INTO new_id;
 
   -- Теги: убираем дубликаты, создаём и привязываем
@@ -404,8 +376,7 @@ CREATE OR REPLACE FUNCTION fn_update_document(
   p_user_id INT,
   p_title TEXT,
   p_document_date DATE,
-  p_author_id INT,
-  p_author_name TEXT,
+  p_author TEXT,       
   p_type_id INT,
   p_file BYTEA,
   p_geojson JSONB,
@@ -416,7 +387,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 LANGUAGE plpgsql AS $$
 DECLARE
-  a_id INT := p_author_id;
+  a_name citext := NULL;
   t TEXT;
   v_exists BOOLEAN;
 BEGIN
@@ -436,15 +407,15 @@ BEGIN
   SELECT EXISTS (SELECT 1 FROM documents WHERE id = p_document_id) INTO v_exists;
   IF NOT v_exists THEN RAISE EXCEPTION 'Document % does not exist', p_document_id; END IF;
 
-  IF a_id IS NULL AND p_author_name IS NOT NULL THEN
-    a_id := _internal_get_or_create_author(p_author_name);
+  IF p_author IS NOT NULL AND btrim(p_author) <> '' THEN
+    a_name := p_author::citext;
   END IF;
 
   -- Обновляем запись
   UPDATE documents SET
     title = p_title,
     document_date = p_document_date,
-    author_id = a_id,
+    author = a_name,
     type_id = p_type_id,
     file_bytea = p_file,
     geojson = p_geojson,
@@ -496,7 +467,7 @@ RETURNS TABLE (
   updated_at TIMESTAMPTZ,
   document_date DATE,
   type_id INT,
-  author_id INT,
+  author citext,
   geojson JSONB,
   can_edit BOOLEAN,
   is_author BOOLEAN
@@ -520,7 +491,7 @@ BEGIN
     d.updated_at,
     d.document_date,
     d.type_id,
-    d.author_id,
+    d.author,
     d.geojson,
     (CASE WHEN v_role = 'administrator' THEN TRUE
           WHEN v_uid IS NOT NULL AND d.created_by = v_uid THEN TRUE
@@ -548,7 +519,7 @@ RETURNS TABLE (
   updated_at TIMESTAMPTZ,
   updated_by INT,
   document_date DATE,
-  author_id INT,
+  author citext,
   type_id INT,
   file_bytea BYTEA,
   geojson JSONB,
@@ -570,7 +541,7 @@ BEGIN
   IF v_role = 'administrator' THEN
     RETURN QUERY
       SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
-             d.document_date, d.author_id, d.type_id, d.file_bytea, d.geojson, d.geom,
+             d.document_date, d.author, d.type_id, d.file_bytea, d.geojson, d.geom,
              TRUE AS can_edit
       FROM documents d
       WHERE d.id = p_document_id;
@@ -593,7 +564,7 @@ BEGIN
 
   RETURN QUERY
     SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
-           d.document_date, d.author_id, d.type_id, d.file_bytea, d.geojson, d.geom,
+           d.document_date, d.author, d.type_id, d.file_bytea, d.geojson, d.geom,
            (CASE WHEN v_role = 'administrator' THEN TRUE
                  WHEN v_uid IS NOT NULL AND d.created_by = v_uid THEN TRUE
                  WHEN v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_edit) THEN TRUE
@@ -611,7 +582,6 @@ LANGUAGE plpgsql AS $$
 DECLARE
   v_start TIMESTAMPTZ := now();
   v_tags_deleted INT := 0;
-  v_authors_deleted INT := 0;
   v_result JSONB;
 BEGIN
   BEGIN
@@ -622,13 +592,6 @@ BEGIN
     v_tags_deleted := -1;
   END;
 
-  BEGIN
-    DELETE FROM authors a
-    WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.author_id = a.id);
-    GET DIAGNOSTICS v_authors_deleted := ROW_COUNT;
-  EXCEPTION WHEN OTHERS THEN
-    v_authors_deleted := -1;
-  END;
 
   v_result := jsonb_build_object(
     'started_at', to_jsonb(v_start),
@@ -640,3 +603,142 @@ BEGIN
   RETURN v_result;
 END;
 $$;
+
+
+
+
+-- ========== Подготовка: роли (на случай, если ещё нет) ==========
+INSERT INTO roles (id,name)
+SELECT * FROM (VALUES (1,'administrator'),(2,'user')) v(id,name)
+ON CONFLICT DO NOTHING;
+
+-- ========== Справочники: типы документов ==========
+INSERT INTO document_types (id, name)
+VALUES
+  (1, 'report'),
+  (2, 'map'),
+  (3, 'note')
+ON CONFLICT (name) DO NOTHING;
+
+-- ========== Пользователи (явно указываем id чтобы удобно ссылаться) ==========
+INSERT INTO users (id, role_id, login, password_hash, full_name, created_at)
+VALUES
+  (1, 1, 'admin', 'hash_admin_123', 'Admin User', now()),
+  (2, 2, 'alice', 'hash_alice_123', 'Alice Example', now()),
+  (3, 2, 'bob',   'hash_bob_123',   'Bob Example',   now())
+ON CONFLICT (login) DO NOTHING;
+
+-- ========= Необязательные стартовые тэги (можно не выполнять, теги будут созданы функцией) =========
+INSERT INTO tags (name) VALUES
+  ('park'), ('survey'), ('strategy'), ('confidential'),
+  ('environment'), ('cleanup'), ('boundary'), ('city'), ('notes')
+ON CONFLICT (name) DO NOTHING;
+
+-- ========== Вставка 5 документов через fn_add_document (возвращает id) ==========
+
+-- 1) Public point (created by Alice)
+SELECT fn_add_document(
+  2, -- p_user_id = alice
+  'Survey of Central Park', -- title
+  '2025-06-01'::date, -- document_date
+  'Dr. Alice', -- author
+  2, -- type_id = map
+  NULL, -- file bytea
+  NULL,
+  ARRAY['park','survey'], -- tags
+  'public' -- privacy
+) AS new_document_id;
+
+
+-- 2) Private report (created by Admin) — дадим доступ пользователю bob
+WITH d AS (
+  SELECT fn_add_document(
+    1, -- admin
+    'Confidential Strategy', -- title
+    '2024-12-15'::date,
+    'Chief Strategist',
+    1, -- type_id = report
+    NULL,
+    NULL::jsonb, -- no geojson
+    ARRAY['strategy','confidential'],
+    'private'
+  ) AS id
+)
+-- grant view permission for Bob (user id = 3) by calling admin-setter
+SELECT fn_set_document_permission((SELECT id FROM d), 1, 3, true, false) FROM d;
+
+-- 3) Public linestring (River cleanup by Bob)
+SELECT fn_add_document(
+  3, -- bob
+  'River Cleanup 2024',
+  '2024-08-20'::date,
+  'Bob',
+  1, -- report
+  NULL,
+  $${
+    "type":"LineString",
+    "coordinates":[
+      [30.4500,50.4200],
+      [30.4600,50.4250],
+      [30.4700,50.4300]
+    ]
+  }$$::jsonb,
+  ARRAY['environment','cleanup'],
+  'public'
+) AS new_document_id;
+
+-- 4) Public polygon (City boundary) — geojson as Feature (polygon)
+SELECT fn_add_document(
+  1, -- admin creates
+  'City Boundary',
+  '2020-01-01'::date,
+  'City Council',
+  2, -- map
+  NULL,
+  $${
+    "type":"Feature",
+    "properties": {"name":"City limits"},
+    "geometry": {
+      "type":"Polygon",
+      "coordinates":[
+        [
+          [30.40,50.40],
+          [30.55,50.40],
+          [30.55,50.55],
+          [30.40,50.55],
+          [30.40,50.40]
+        ]
+      ]
+    }
+  }$$::jsonb,
+  ARRAY['boundary','city'],
+  'public'
+) AS new_document_id;
+
+-- 5) Public notes (simple document without geojson)
+SELECT fn_add_document(
+  2, -- alice
+  'Meeting Notes — 2025-01-10',
+  '2025-01-10'::date,
+  'Alice Example',
+  3, -- note
+  NULL,
+  NULL::jsonb,
+  ARRAY['notes'],
+  'public'
+) AS new_document_id;
+
+-- ========== Проверка: вывести все документы и связанные тэги/создателей ==========
+-- Основной быстрый просмотр
+SELECT d.id, d.title, d.privacy, d.document_date, d.author, dt.name AS type_name, u.login AS created_by_login
+FROM documents d
+LEFT JOIN document_types dt ON dt.id = d.type_id
+LEFT JOIN users u ON u.id = d.created_by
+ORDER BY d.created_at DESC;
+
+-- Тэги (каждая строка = документ + тэг)
+SELECT d.id AS document_id, d.title, t.name AS tag
+FROM documents d
+JOIN document_tags dtg ON dtg.document_id = d.id
+JOIN tags t ON t.id = dtg.tag_id
+ORDER BY d.id, t.name;

@@ -15,14 +15,6 @@ type Authorization interface {
 	GetUser(ctx context.Context, login, passwordHash string) (archive.User, error)
 }
 
-type Authors interface {
-	CreateAuthor(ctx context.Context, a archive.Author) (int64, error)
-	GetAllAuthors(ctx context.Context) ([]archive.Author, error)
-	GetAuthor(ctx context.Context, id int64) (archive.Author, error)
-	UpdateAuthor(ctx context.Context, id int64, a archive.Author) error
-	DeleteAuthor(ctx context.Context, id int64) error
-}
-
 type DocumentTypes interface {
 	CreateDocumentType(ctx context.Context, t archive.DocumentType) (int64, error)
 	GetAllDocumentTypes(ctx context.Context) ([]archive.DocumentType, error)
@@ -59,7 +51,6 @@ type Admin interface {
 // Repository aggregates sub-repos
 type Repository struct {
 	Authorization Authorization
-	Authors       Authors
 	DocumentTypes DocumentTypes
 	Tags          Tags
 	Document      Document
@@ -71,7 +62,6 @@ type Repository struct {
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{
 		Authorization: NewAuthPostgres(db),
-		Authors:       NewAuthorsPostgres(db),
 		DocumentTypes: NewDocumentTypesPostgres(db),
 		Tags:          NewTagsPostgres(db),
 		Document:      NewDocumentPostgres(db),

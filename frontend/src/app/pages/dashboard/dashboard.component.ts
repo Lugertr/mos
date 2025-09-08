@@ -9,13 +9,17 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { DashboardTableComponent } from './dashboard-table/dashboard-table.component';
 import { MatDialog } from '@angular/material/dialog';
 import { DashboardCreateComponent } from './dashboard-create/dashboard-create.component';
+import { MatCardModule } from '@angular/material/card';
+import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { DashboardCardComponent } from './dashboard-card/dashboard-card.component';
 
 @Component({
   selector: 'app-dashboard',
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   standalone: true,
-  imports: [MatButtonModule, MatIconModule, DashboardTableComponent],
+  imports: [MatButtonModule, MatIconModule, MatCardModule, DashboardTableComponent, MatFormFieldModule, DashboardCardComponent, MatInputModule],
   providers: [DashboardService],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -32,6 +36,7 @@ export class DashboardComponent implements OnInit {
 
   private readonly reload$ = new Subject<void>();
   readonly documents = signal<ArchiveDocument[]>([]);
+  readonly filter = signal('');
 
   constructor() {
     this.reload$.pipe(
@@ -93,4 +98,6 @@ export class DashboardComponent implements OnInit {
         }
       })
   }
+
+
 }

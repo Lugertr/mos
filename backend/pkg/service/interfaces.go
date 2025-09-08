@@ -14,15 +14,6 @@ type Authorization interface {
 	ParseToken(ctx context.Context, token string) (int64, error)
 }
 
-// Authors сервис (справочник authors)
-type Authors interface {
-	CreateAuthor(ctx context.Context, in archive.AuthorCreate) (int64, error)
-	GetAllAuthors(ctx context.Context) ([]archive.Author, error)
-	GetAuthor(ctx context.Context, id int64) (archive.Author, error)
-	UpdateAuthor(ctx context.Context, id int64, in archive.Author) error
-	DeleteAuthor(ctx context.Context, id int64) error
-}
-
 // DocumentTypes сервис (справочник document_types)
 type DocumentTypes interface {
 	CreateDocumentType(ctx context.Context, in archive.DocumentTypeCreate) (int64, error)

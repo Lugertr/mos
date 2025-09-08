@@ -32,13 +32,6 @@ func (h *Handler) InitRoutes() *gin.Engine {
 
 	ref := router.Group("/api")
 	{
-		// authors
-		ref.POST("/authors", h.createAuthor)
-		ref.GET("/authors", h.getAllAuthors)
-		ref.GET("/authors/:id", h.getAuthorByID)
-		ref.PUT("/authors/:id", h.updateAuthor)
-		ref.DELETE("/authors/:id", h.deleteAuthor)
-
 		// document types
 		ref.POST("/document_types", h.createDocumentType)
 		ref.GET("/document_types", h.getAllDocumentTypes)

@@ -1,23 +1,42 @@
 @let docs = documents();
 
 <div class="toolbar">
+  <mat-form-field class="no-bottom-space">
+    <mat-label>Filter</mat-label>
+    <input
+      matInput
+      (input)="filter.set($any($event.target).value)"
+      [value]="filter()"
+      placeholder="Поиск документов"
+      #input
+    />
+  </mat-form-field>
+
   @if (docs.length) {
-  <button mat-icon-button (click)="refresh()">
+  <button mat-icon-button (click)="refresh()" class="primary">
     <mat-icon>refresh</mat-icon>
   </button>
   }
 </div>
 
 <app-dashboard-table
-  [documents]="docs"
   [class.display-none]="!docs?.length"
+  [documents]="docs"
+  [filter]="filter()"
 ></app-dashboard-table>
+
 @if (!docs.length) {
 <div class="empty">
   <h2>Ещё нет документов</h2>
-  <button mat-flat-button color="primary" [disabled]="isLoading()" (click)="addDocument()">
+  <button
+    mat-flat-button
+    color="primary"
+    [disabled]="isLoading()"
+    (click)="addDocument()"
+  >
     <mat-icon>add</mat-icon>
     Добавить документ
   </button>
 </div>
 }
+<app-dashboard-card></app-dashboard-card>

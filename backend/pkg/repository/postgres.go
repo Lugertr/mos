@@ -31,7 +31,6 @@ const (
 	internalGetOrCreateTag    = "_internal_get_or_create_tag"
 
 	documentTypesTable = "document_types"
-	authorsTable       = "authors"
 	tagsTable          = "tags"
 	documentTagsTable  = "document_tags"
 )

@@ -7,11 +7,6 @@ import (
 
 // --- Справочники ---------------------------------------------------------
 
-type Author struct {
-	ID       int64  `db:"id" json:"id"`
-	FullName string `db:"full_name" json:"full_name"`
-}
-
 type DocumentType struct {
 	ID   int64  `db:"id" json:"id"`
 	Name string `db:"name" json:"name"`
@@ -20,10 +15,6 @@ type DocumentType struct {
 type Tag struct {
 	ID   int64  `db:"id" json:"id"`
 	Name string `db:"name" json:"name"`
-}
-
-type AuthorCreate struct {
-	FullName string `json:"full_name" validate:"required,min=2"`
 }
 
 type TagCreate struct {
@@ -45,7 +36,7 @@ const (
 )
 
 // Document — основная сущность документов.
-// Поля делаются указателями там, где в схеме допускается NULL.
+// Поля указателями там, где в схеме допускается NULL.
 type Document struct {
 	ID           int64       `db:"id" json:"id"`
 	Title        string      `db:"title" json:"title"`
@@ -55,15 +46,13 @@ type Document struct {
 	UpdatedAt    *time.Time  `db:"updated_at" json:"updated_at,omitempty"`
 	UpdatedBy    *int64      `db:"updated_by" json:"updated_by,omitempty"`
 	DocumentDate *time.Time  `db:"document_date" json:"document_date,omitempty"`
-	AuthorID     *int64      `db:"author_id" json:"author_id,omitempty"`
-	TypeID       *int64      `db:"type_id" json:"type_id,omitempty"`
-	// файл в bytea
-	File []byte `db:"file_bytea" json:"file,omitempty"`
-	// geojson хранится в БД как jsonb
-	GeoJSON json.RawMessage `db:"geojson" json:"geojson,omitempty"`
-	// geom — geometry(Geometry,4326). При SELECT удобно получать в виде GeoJSON/ WKT;
-	// тут — строка (например, результат ST_AsGeoJSON(geom) или ST_AsText(geom))
-	Geom *string `db:"geom" json:"geom,omitempty"`
+	// author — теперь имя автора как текст (citext), может быть NULL
+	Author *string `db:"author" json:"author,omitempty"`
+	TypeID *int64  `db:"type_id" json:"type_id,omitempty"`
+	// файл может быть NULL => указываем как *([]byte)
+	File    *[]byte          `db:"file_bytea" json:"file,omitempty"`
+	GeoJSON *json.RawMessage `db:"geojson" json:"geojson,omitempty"`
+	Geom    *string          `db:"geom" json:"geom,omitempty"`
 }
 
 // --- Связующие таблицы ---------------------------------------------------
@@ -83,7 +72,7 @@ type DocumentPermission struct {
 // DocumentSearchFilter — фильтр для поиска документов (используется в handlers/services)
 type DocumentSearchFilter struct {
 	Tag      string `json:"tag"`       // тег
-	Author   string `json:"author"`    // автор (имя) или author_id в виде строки
+	Author   string `json:"author"`    // автор (имя)
 	Type     string `json:"type"`      // тип документа (имя) или type_id
 	DateFrom string `json:"date_from"` // диапазон дат — левые/правые границы (строки парсятся в сервисе/handler)
 	DateTo   string `json:"date_to"`
@@ -101,13 +90,12 @@ type LogRecord struct {
 	UserID     *int64          `db:"user_id" json:"user_id,omitempty"`
 	UserLogin  *string         `db:"user_login" json:"user_login,omitempty"`
 	ActionTime time.Time       `db:"action_time" json:"action_time"`
-	Changes    json.RawMessage `db:"changes" json:"changes,omitempty"` // jsonb
+	Changes    json.RawMessage `db:"changes" json:"changes,omitempty"`
 }
 
 // --- Дополнительные , удобные для сервисов/handler'ов -------------------
 
-// DocumentSecure — результат fn_get_document_secure / fn_get_documents_by_tag_secure
-// Поля соответствуют возвращаемым колонкам функции.
+// DocumentSecure — результат security-функций (fn_get_document_by_id / fn_get_documents_for_user)
 type DocumentSecure struct {
 	DocID             int64       `db:"doc_id" json:"doc_id"`
 	Title             string      `db:"title" json:"title"`
@@ -121,8 +109,7 @@ type DocumentSecure struct {
 	UpdatedByLogin    *string     `db:"updated_by_login" json:"updated_by_login,omitempty"`
 	UpdatedByFullName *string     `db:"updated_by_full_name" json:"updated_by_full_name,omitempty"`
 	DocumentDate      *time.Time  `db:"document_date" json:"document_date,omitempty"`
-	AuthorID          *int64      `db:"author_id" json:"author_id,omitempty"`
-	AuthorName        *string     `db:"author_name" json:"author_name,omitempty"`
+	Author            *string     `db:"author" json:"author,omitempty"`
 	TypeID            *int64      `db:"type_id" json:"type_id,omitempty"`
 	TypeName          *string     `db:"type_name" json:"type_name,omitempty"`
 	Tags              []string    `db:"tags" json:"tags,omitempty"`
@@ -137,11 +124,10 @@ type DocumentCreateInput struct {
 	Title        string
 	Privacy      PrivacyType
 	DocumentDate *time.Time
-	AuthorID     *int64
-	AuthorName   *string
+	Author       *string
 	TypeID       *int64
-	File         []byte
-	GeoJSON      json.RawMessage
+	File         *[]byte          // nil -> NULL в БД
+	GeoJSON      *json.RawMessage // nil -> NULL в БД
 	Tags         []string
 	CreatorID    int64
 }
@@ -152,8 +138,7 @@ type DocumentUpdateInput struct {
 	Title        *string
 	Privacy      *PrivacyType
 	DocumentDate *time.Time
-	AuthorID     *int64
-	AuthorName   *string
+	Author       *string
 	TypeID       *int64
 	File         *[]byte
 	GeoJSON      *json.RawMessage

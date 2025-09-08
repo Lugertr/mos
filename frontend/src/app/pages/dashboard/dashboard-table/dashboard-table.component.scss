@@ -1,6 +1,24 @@
-.footer {
-  justify-content: center;
+:host {
+  height: 100%;
+  background-color: var(
+    --mdc-elevated-card-container-color,
+    var(--mat-sys-surface-container-low)
+  );
+  border-color: var(
+    --mdc-elevated-card-container-color,
+    var(--mat-sys-surface-container-low)
+  );
+  border-radius: var(
+    --mdc-elevated-card-container-shape,
+    var(--mat-sys-corner-medium)
+  );
+  box-shadow: var(
+    --mdc-elevated-card-container-elevation,
+    var(--mat-sys-level1)
+  );
 }
-mat-toolbar {
-  margin-top: auto;
+
+.row-selected {
+  color: var(--mat-sys-primary);
+  background-color: var(--mat-sys-inverse-primary);
 }

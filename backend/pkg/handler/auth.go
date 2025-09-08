@@ -1,9 +1,10 @@
 package handler
 
 import (
-	"archive"
 	"net/http"
 	"strings"
+
+	"archive"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,6 +64,7 @@ func (h *Handler) signIn(c *gin.Context) {
 
 	c.JSON(http.StatusOK, map[string]interface{}{"token": token})
 }
+
 func (h *Handler) refreshToken(c *gin.Context) {
 	header := c.GetHeader("Authorization")
 	if header == "" {
@@ -82,7 +84,6 @@ func (h *Handler) refreshToken(c *gin.Context) {
 
 	newToken, err := h.services.Authorization.RefreshToken(c.Request.Context(), oldToken)
 	if err != nil {
-		// если токен просрочен или неверен — вернуть 401
 		newErrorResponse(c, http.StatusUnauthorized, err.Error())
 		return
 	}

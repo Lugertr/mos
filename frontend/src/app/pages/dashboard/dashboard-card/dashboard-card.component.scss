@@ -1,0 +1,40 @@
+.doc-card {
+  min-width: 300px;
+  max-width: 540px;
+  margin: 8px;
+  .avatar {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    mat-icon {
+      font-size: 28px;
+    }
+  }
+  .title {
+    font-weight: 600;
+  }
+  .subtitle {
+    color: rgba(0, 0, 0, 0.6);
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    padding: 6px 0;
+    .label {
+      min-width: 120px;
+      font-size: 13px;
+      color: rgba(0, 0, 0, 0.6);
+    }
+    .value {
+      font-size: 14px;
+      flex: 1;
+      word-break: break-word;
+    }
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+}

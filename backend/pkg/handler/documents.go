@@ -39,15 +39,8 @@ func (h *Handler) createDocument(c *gin.Context) {
 		}
 	}
 
-	// author_id -> AuthorID pointer
-	if v := c.PostForm("author_id"); v != "" {
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			in.AuthorID = &id
-		}
-	}
-	// author_name
-	if v := c.PostForm("author_name"); v != "" {
-		in.AuthorName = &v
+	if v := c.PostForm("author"); v != "" {
+		in.Author = &v
 	}
 
 	// document_type_id -> TypeID
@@ -57,22 +50,13 @@ func (h *Handler) createDocument(c *gin.Context) {
 		}
 	}
 
-	// geojson (optional) — validate JSON
 	if v := c.PostForm("geojson"); v != "" {
 		raw := json.RawMessage([]byte(v))
 		if !json.Valid(raw) {
 			newErrorResponse(c, http.StatusBadRequest, "invalid geojson")
 			return
 		}
-		in.GeoJSON = raw
-	}
-
-	// geom (optional) — attempt to set GeoJSON if valid
-	if v := c.PostForm("geom"); v != "" {
-		if json.Valid([]byte(v)) {
-			raw := json.RawMessage([]byte(v))
-			in.GeoJSON = raw
-		}
+		in.GeoJSON = &raw
 	}
 
 	// tags (optional) — comma separated
@@ -84,7 +68,6 @@ func (h *Handler) createDocument(c *gin.Context) {
 		in.Tags = parts
 	}
 
-	// file upload (optional) -> read bytes
 	if fileHdr, err := c.FormFile("file"); err == nil {
 		f, err := fileHdr.Open()
 		if err != nil {
@@ -97,7 +80,7 @@ func (h *Handler) createDocument(c *gin.Context) {
 			newErrorResponse(c, http.StatusInternalServerError, "failed to read uploaded file")
 			return
 		}
-		in.File = b
+		in.File = &b // <-- теперь указатель
 	}
 
 	// creator id
@@ -193,13 +176,8 @@ func (h *Handler) updateDocument(c *gin.Context) {
 		}
 	}
 
-	if v := c.PostForm("author_id"); v != "" {
-		if idv, err := strconv.ParseInt(v, 10, 64); err == nil {
-			in.AuthorID = &idv
-		}
-	}
-	if v := c.PostForm("author_name"); v != "" {
-		in.AuthorName = &v
+	if v := c.PostForm("author"); v != "" {
+		in.Author = &v
 	}
 
 	if v := c.PostForm("document_type_id"); v != "" {

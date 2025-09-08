@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// рекомендуется вынести в конфиг приложения
+	// желательно вынести в конфиг приложения
 	salt       = "hjqrhjqw124617ajfhajs"
 	signingKey = "archive#test#just#some###24214texTTTT#S"
 	tokenTTL   = 12 * time.Hour
@@ -52,22 +52,12 @@ func (s *AuthService) GenerateToken(ctx context.Context, username, password stri
 		return "", err
 	}
 
-	claims := tokenClaims{
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(tokenTTL).Unix(),
-			IssuedAt:  time.Now().Unix(),
-		},
-		UserId: u.ID,
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
-	return token.SignedString([]byte(signingKey))
+	return s.generateTokenForUserID(u.ID)
 }
 
-// ParseToken проверяет подпись и срок жизни токена и возвращает user id.
-// ctx не используется внутри, но оставлен в сигнатуре для совместимости с интерфейсом.
 func (s *AuthService) ParseToken(ctx context.Context, accessToken string) (int64, error) {
 	token, err := jwt.ParseWithClaims(accessToken, &tokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// проверка метода подписи
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("invalid signing method")
 		}
@@ -84,21 +74,24 @@ func (s *AuthService) ParseToken(ctx context.Context, accessToken string) (int64
 	return claims.UserId, nil
 }
 
-// RefreshToken: если входной токен валиден (подпись + exp), возвращаем новый токен с продлённым TTL.
+// RefreshToken — если переданный токен валиден (подпись и срок жизни),
+// создаёт и возвращает новый токен для того же user_id.
 func (s *AuthService) RefreshToken(ctx context.Context, accessToken string) (string, error) {
 	userId, err := s.ParseToken(ctx, accessToken)
 	if err != nil {
 		return "", err
 	}
+	return s.generateTokenForUserID(userId)
+}
 
+func (s *AuthService) generateTokenForUserID(userID int64) (string, error) {
 	claims := tokenClaims{
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(tokenTTL).Unix(),
 			IssuedAt:  time.Now().Unix(),
 		},
-		UserId: userId,
+		UserId: userID,
 	}
-
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
 	return token.SignedString([]byte(signingKey))
 }

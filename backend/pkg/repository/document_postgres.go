@@ -20,6 +20,7 @@ func NewDocumentPostgres(db *sqlx.DB) *DocumentPostgres {
 	return &DocumentPostgres{db: db}
 }
 
+// userIDFromCtx возвращает user id из контекста (поддерживает int/int64/*int64)
 func userIDFromCtx(ctx context.Context) (int64, bool) {
 	v := ctx.Value(CtxUserIDKey{})
 	if v == nil {
@@ -40,32 +41,68 @@ func userIDFromCtx(ctx context.Context) (int64, bool) {
 	}
 }
 
-// CreateDocument -> fn_add_document
+// --- helpers for nullable params ---
+// возвращает nil если geojson == nil или пустой, иначе валидированный json.RawMessage
+func geoJSONParam(m *json.RawMessage) (interface{}, error) {
+	if m == nil || len(*m) == 0 {
+		return nil, nil
+	}
+	if !json.Valid(*m) {
+		return nil, fmt.Errorf("invalid geojson")
+	}
+	return *m, nil
+}
+
+func bytesParam(b *[]byte) interface{} {
+	if b == nil || len(*b) == 0 {
+		// если хотим отличать пустой слайс от NULL, можно вернуть *b,
+		// но текущее поведение: пустой слайс -> NULL (как раньше).
+		return nil
+	}
+	return *b
+}
+
+func trimStringParam(s *string) interface{} {
+	if s == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*s)
+	if t == "" {
+		return nil
+	}
+	return t
+}
+
+func privacyParam(p archive.PrivacyType) interface{} {
+	if p == "" {
+		return nil
+	}
+	return string(p)
+}
+
+// --- CreateDocument -> fn_add_document ---
 func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.DocumentCreateInput) (int64, error) {
 	var id int64
 
-	var geojson interface{}
-	if len(in.GeoJSON) > 0 {
-		if !json.Valid(in.GeoJSON) {
-			return 0, fmt.Errorf("invalid geojson")
-		}
-		geojson = in.GeoJSON
-	} else {
-		geojson = nil
+	geojsonVal, err := geoJSONParam(in.GeoJSON)
+	if err != nil {
+		return 0, err
 	}
+	fileVal := bytesParam(in.File)
+	authorVal := trimStringParam(in.Author)
+	privacyVal := privacyParam(in.Privacy)
 
-	// SELECT fn_add_document($1, $2, ... )
-	query := `SELECT ` + fnAddDocument + `($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	err := r.db.QueryRowxContext(ctx, query,
+	query := `SELECT ` + fnAddDocument + `($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+	err = r.db.QueryRowxContext(ctx, query,
 		in.CreatorID,
 		in.Title,
 		in.DocumentDate,
-		in.AuthorID,
-		in.AuthorName,
+		authorVal,
 		in.TypeID,
-		in.File,
-		geojson,
-		[]string(in.Tags),
+		fileVal,
+		geojsonVal,
+		in.Tags,
+		privacyVal,
 	).Scan(&id)
 	if err != nil {
 		return 0, err
@@ -73,20 +110,17 @@ func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.Docume
 	return id, nil
 }
 
-// SearchDocumentsByTag -> в новой БД нет fn_get_documents_by_tag_secure.
-// Используем fn_get_documents_for_user(p_requester_id) — возвращает список документов доступных пользователю.
-// Параметр filter.Tag/Author/Type не учитывается (вы можете расширить БД/функцию при необходимости).
+// --- SearchDocumentsByTag -> fn_get_documents_for_user ---
 func (r *DocumentPostgres) SearchDocumentsByTag(ctx context.Context, filter archive.DocumentSearchFilter) ([]archive.DocumentSecure, error) {
-	// Запрос к security-функции, которая возвращает таблицу для пользователя.
-	query := `
+	const q = `
 SELECT
   id,
   title,
   privacy,
   updated_at,
   document_date,
-  author_id,
   type_id,
+  author,
   geojson,
   can_edit,
   is_author
@@ -94,72 +128,72 @@ FROM ` + fnGetDocumentsForUser + `($1)
 ORDER BY COALESCE(updated_at, now()) DESC
 `
 
-	var requester interface{} = nil
+	var requester interface{}
 	if uid, ok := userIDFromCtx(ctx); ok {
 		requester = uid
 	}
 
-	// промежуточная структура для сканирования результата fn_get_documents_for_user
 	type listRow struct {
 		ID           int64               `db:"id"`
 		Title        string              `db:"title"`
 		Privacy      archive.PrivacyType `db:"privacy"`
 		UpdatedAt    sql.NullTime        `db:"updated_at"`
 		DocumentDate *time.Time          `db:"document_date"`
-		AuthorID     *int64              `db:"author_id"`
 		TypeID       *int64              `db:"type_id"`
-		GeoJSON      json.RawMessage     `db:"geojson"`
+		Author       sql.NullString      `db:"author"`
+		GeoJSON      *json.RawMessage    `db:"geojson"`
 		CanEdit      bool                `db:"can_edit"`
 		IsAuthor     bool                `db:"is_author"`
 	}
 
 	var rows []listRow
-	if err := r.db.SelectContext(ctx, &rows, query, requester); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, q, requester); err != nil {
 		return nil, err
 	}
 
 	out := make([]archive.DocumentSecure, 0, len(rows))
-	for _, r0 := range rows {
+	for _, rr := range rows {
 		var updatedAtPtr *time.Time
-		if r0.UpdatedAt.Valid {
-			t := r0.UpdatedAt.Time
+		if rr.UpdatedAt.Valid {
+			t := rr.UpdatedAt.Time
 			updatedAtPtr = &t
 		}
-		// Map to DocumentSecure — заполним те поля, которые есть в ответе функции.
+		var authorPtr *string
+		if rr.Author.Valid {
+			s := rr.Author.String
+			authorPtr = &s
+		}
 		ds := archive.DocumentSecure{
-			DocID:            r0.ID,
-			Title:            r0.Title,
-			Privacy:          r0.Privacy,
+			DocID:            rr.ID,
+			Title:            rr.Title,
+			Privacy:          rr.Privacy,
 			UpdatedAt:        updatedAtPtr,
-			DocumentDate:     r0.DocumentDate,
-			AuthorID:         r0.AuthorID,
-			TypeID:           r0.TypeID,
-			Tags:             nil, // fn_get_documents_for_user не возвращает tags
+			DocumentDate:     rr.DocumentDate,
+			Author:           authorPtr,
+			TypeID:           rr.TypeID,
+			Tags:             nil,
 			Viewers:          nil,
 			Editors:          nil,
-			CanRequesterEdit: r0.CanEdit,
+			CanRequesterEdit: rr.CanEdit,
 		}
-		// If geojson exists, try to put it into Geom as GeoJSON string (optional)
-		if len(r0.GeoJSON) > 0 {
-			s := string(r0.GeoJSON)
+		if rr.GeoJSON != nil && len(*rr.GeoJSON) > 0 {
+			s := string(*rr.GeoJSON)
 			ds.Geom = &s
 		}
 		out = append(out, ds)
 	}
 
-	// Apply offset/limit at app level if requested (fn doesn't support it here)
+	// apply offset/limit in app layer
 	start := filter.Offset
 	if start < 0 {
 		start = 0
 	}
-	end := len(out)
-	if filter.Limit > 0 {
-		if start+filter.Limit < end {
-			end = start + filter.Limit
-		}
-	}
-	if start > len(out) {
+	if start >= len(out) {
 		return []archive.DocumentSecure{}, nil
+	}
+	end := len(out)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
 	}
 	return out[start:end], nil
 }
@@ -171,11 +205,9 @@ func nullString(s string) interface{} {
 	return s
 }
 
-// GetDocumentByID -> fn_get_document_by_id(document_id, requester_id)
+// --- GetDocumentByID -> fn_get_document_by_id ---
 func (r *DocumentPostgres) GetDocumentByID(ctx context.Context, id int64) (archive.DocumentSecure, error) {
-	var out archive.DocumentSecure
-	// fn_get_document_by_id returns a different set of columns (see SQL). We'll query and map available columns.
-	query := `
+	const q = `
 SELECT
   id,
   title,
@@ -185,7 +217,7 @@ SELECT
   updated_at,
   updated_by,
   document_date,
-  author_id,
+  author,
   type_id,
   file_bytea,
   geojson,
@@ -194,11 +226,12 @@ SELECT
 FROM ` + fnGetDocumentByID + `($1,$2)
 LIMIT 1
 `
-	var requester interface{} = nil
+
+	var requester interface{}
 	if uid, ok := userIDFromCtx(ctx); ok {
 		requester = uid
 	}
-	// промежуточ структура для сканирования
+
 	type docRow struct {
 		ID           int64               `db:"id"`
 		Title        string              `db:"title"`
@@ -208,16 +241,16 @@ LIMIT 1
 		UpdatedAt    sql.NullTime        `db:"updated_at"`
 		UpdatedBy    *int64              `db:"updated_by"`
 		DocumentDate *time.Time          `db:"document_date"`
-		AuthorID     *int64              `db:"author_id"`
+		Author       sql.NullString      `db:"author"`
 		TypeID       *int64              `db:"type_id"`
 		File         []byte              `db:"file_bytea"`
-		GeoJSON      json.RawMessage     `db:"geojson"`
+		GeoJSON      *json.RawMessage    `db:"geojson"`
 		Geom         *string             `db:"geom"`
 		CanEdit      bool                `db:"can_edit"`
 	}
 
 	var row docRow
-	if err := r.db.GetContext(ctx, &row, query, id, requester); err != nil {
+	if err := r.db.GetContext(ctx, &row, q, id, requester); err != nil {
 		if err == sql.ErrNoRows {
 			return archive.DocumentSecure{}, nil
 		}
@@ -229,8 +262,13 @@ LIMIT 1
 		t := row.UpdatedAt.Time
 		updatedAtPtr = &t
 	}
+	var authorPtr *string
+	if row.Author.Valid {
+		s := row.Author.String
+		authorPtr = &s
+	}
 
-	out = archive.DocumentSecure{
+	out := archive.DocumentSecure{
 		DocID:            row.ID,
 		Title:            row.Title,
 		Privacy:          row.Privacy,
@@ -239,23 +277,21 @@ LIMIT 1
 		UpdatedAt:        updatedAtPtr,
 		UpdatedBy:        row.UpdatedBy,
 		DocumentDate:     row.DocumentDate,
-		AuthorID:         row.AuthorID,
+		Author:           authorPtr,
 		TypeID:           row.TypeID,
-		Tags:             nil, // not returned by fn_get_document_by_id
+		Tags:             nil,
 		Viewers:          nil,
 		Editors:          nil,
 		CanRequesterEdit: row.CanEdit,
 		Geom:             row.Geom,
 	}
 
-	// file/geojson are available in row.File / row.GeoJSON if needed by caller (but DocumentSecure doesn't expose file)
 	_ = row.File
 	_ = row.GeoJSON
 
 	return out, nil
 }
 
-// UpdateDocument -> fn_update_document
 func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in archive.DocumentUpdateInput) error {
 	if in.DocumentID == 0 {
 		in.DocumentID = id
@@ -268,59 +304,47 @@ func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in arch
 		}
 	}
 
-	var titleParam interface{}
+	titleParam := interface{}(nil)
 	if in.Title != nil {
 		titleParam = *in.Title
-	} else {
-		titleParam = nil
-	}
-	var fileParam interface{}
-	if in.File != nil {
-		fileParam = *in.File
-	} else {
-		fileParam = nil
-	}
-	var geojsonParam interface{}
-	if in.GeoJSON != nil {
-		// validate JSON if present
-		if !json.Valid(*in.GeoJSON) {
-			return fmt.Errorf("invalid geojson")
-		}
-		geojsonParam = *in.GeoJSON
-	} else {
-		geojsonParam = nil
-	}
-	var tagsParam interface{}
-	if in.Tags != nil {
-		tagsParam = *in.Tags
-	} else {
-		tagsParam = nil
-	}
-	var privacyParam interface{}
-	if in.Privacy != nil {
-		privacyParam = string(*in.Privacy)
-	} else {
-		privacyParam = nil
 	}
 
+	fileParam := bytesParam(in.File)
+
+	geojsonVal, err := geoJSONParam(in.GeoJSON)
+	if err != nil {
+		return err
+	}
+
+	tagsParam := interface{}(nil)
+	if in.Tags != nil {
+		tagsParam = *in.Tags
+	}
+
+	privacyVal := interface{}(nil)
+	if in.Privacy != nil {
+		privacyVal = string(*in.Privacy)
+	}
+
+	authorVal := trimStringParam(in.Author)
+
 	query := `SELECT ` + fnUpdateDocument + `($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
-	_, err := r.db.ExecContext(ctx, query,
+	_, err = r.db.ExecContext(ctx, query,
 		in.DocumentID,
 		in.UpdaterID,
 		titleParam,
 		in.DocumentDate,
-		in.AuthorID,
-		in.AuthorName,
+		authorVal,
 		in.TypeID,
 		fileParam,
-		geojsonParam,
+		geojsonVal,
 		tagsParam,
-		privacyParam,
+		privacyVal,
 	)
 	return err
 }
 
-// DeleteDocument -> fn_delete_document(document_id, user_id)
+// DeleteDocument, SetDocumentPermission, RemoveDocumentPermission — без изменений
 func (r *DocumentPostgres) DeleteDocument(ctx context.Context, id int64) error {
 	uid, ok := userIDFromCtx(ctx)
 	if !ok {
@@ -331,7 +355,6 @@ func (r *DocumentPostgres) DeleteDocument(ctx context.Context, id int64) error {
 	return err
 }
 
-// SetDocumentPermission -> fn_set_document_permission(admin_id, document_id, target_user_id, can_view, can_edit)
 func (r *DocumentPostgres) SetDocumentPermission(ctx context.Context, docID int64, p archive.DocumentPermission) error {
 	adminID, ok := userIDFromCtx(ctx)
 	if !ok {
@@ -342,7 +365,6 @@ func (r *DocumentPostgres) SetDocumentPermission(ctx context.Context, docID int6
 	return err
 }
 
-// RemoveDocumentPermission -> fn_remove_document_permission(admin_id, document_id, target_user_id)
 func (r *DocumentPostgres) RemoveDocumentPermission(ctx context.Context, docID int64, targetUserID int64) error {
 	adminID, ok := userIDFromCtx(ctx)
 	if !ok {

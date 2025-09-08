@@ -1,11 +1,12 @@
 package service
 
 import (
-	"archive"
-	"archive/pkg/repository"
 	"context"
 	"errors"
 	"strings"
+
+	"archive"
+	"archive/pkg/repository"
 
 	"github.com/go-playground/validator/v10"
 )
