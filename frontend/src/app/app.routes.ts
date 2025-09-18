@@ -2,8 +2,9 @@ import { Routes } from '@angular/router';
 import { authGuard } from '@core/auth/auth.guard';
 
 export enum RoutesPath {
-  Home = '',
+  About = '',
   Dashboard = 'dashboard',
+  Conversion = 'conversion',
   SignIn = 'sign-in',
   SignUp = 'sign-up',
   Profile = 'profile',
@@ -17,24 +18,30 @@ export interface MenuItem {
   path: RoutesPath;
   title: string;
   icon?: string;
+  private?: boolean
 }
 
 export const MENU_ITEMS: MenuItem[] = [
-  { path: RoutesPath.Home, title: 'О проекте', icon: 'home' },
-  { path: RoutesPath.Dashboard, title: 'Дашбоард', icon: 'dashboard' },
+  { path: RoutesPath.About, title: 'О проекте', icon: 'home' },
+  { path: RoutesPath.Dashboard, title: 'Дашбоард', icon: 'dashboard', private: true },
+  { path: RoutesPath.Conversion, title: 'Конверция документов', icon: 'article_shortcut' },
+
 ];
 
 export const routes: Routes = [
   {
-    path: RoutesPath.Home,
-    loadComponent: () => import('./pages/home/home.component').then(c => c.HomeComponent),
+    path: RoutesPath.About,
+    loadComponent: () => import('./pages/about/about.component').then(c => c.AboutComponent),
     pathMatch: 'full',
-    canActivate: [authGuard],
   },
   {
     path: RoutesPath.Dashboard,
     loadComponent: () => import('./pages/dashboard/dashboard.component').then(c => c.DashboardComponent),
     canActivate: [authGuard],
+  },
+  {
+    path: RoutesPath.Conversion,
+    loadComponent: () => import('./pages/conversion/conversion.component').then(c => c.ConversionComponent),
   },
   {
     path: RoutesPath.SignIn,
@@ -44,5 +51,5 @@ export const routes: Routes = [
     path: RoutesPath.SignUp,
     loadComponent: () => import('./pages/auth/sign-up/sign-up.component').then(c => c.SignUpComponent),
   },
-  { path: '**', redirectTo: RoutesPath.Dashboard },
+  { path: '**', redirectTo: RoutesPath.About },
 ];

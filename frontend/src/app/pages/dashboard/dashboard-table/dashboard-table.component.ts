@@ -25,7 +25,7 @@ export class DashboardTableComponent implements AfterViewInit {
   readonly selected = signal<ArchiveDocument | null>(null);
 
   readonly dataSource = new TableDataSource<ArchiveDocument>([]);
-  readonly displayedColumns = ['doc_id', 'title', 'type_name', 'author_name', 'document_date', 'privacy'];
+  readonly displayedColumns = ['doc_id', 'title', 'type_name', 'author', 'document_date', 'privacy'];
 
   constructor() {
     effect(() => {

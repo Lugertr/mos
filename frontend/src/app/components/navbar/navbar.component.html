@@ -1,8 +1,7 @@
-<mat-toolbar>
-  <div class="navbar-content">
+  <div class="content">
     <h1>ЛЦТ №9</h1>
-    <div class="navbar-content-list">
-      @if (isAuth) { @for (menu of menuItems; track menu) {
+    <div class="content-list">
+      @for (menu of menuItems; track menu) { @if (!menu.private || isAuth) {
       <a
         mat-button
         [routerLink]="menu.path"
@@ -15,20 +14,23 @@
       } }
     </div>
 
-    <div>
+    <div class="control">
       <button mat-icon-button (click)="themeService.toggle()">
         <mat-icon>{{
           themeService.isDark() ? "wb_sunny" : "nights_stay"
         }}</mat-icon>
       </button>
       @if (isAuth) {
-      <a [routerLink]="userLink" mat-icon-button>
+      <a [routerLink]="userLink" mat-icon-button matTooltip="Аккаунт">
         <mat-icon>account_circle</mat-icon>
       </a>
-      <button mat-icon-button (click)="signOut()">
+      <button mat-icon-button (click)="signOut()" matTooltip="Выйти из аккаунта">
         <mat-icon>logout</mat-icon>
+      </button>
+      } @else {
+      <button mat-button (click)="signOut()">
+        Войти
       </button>
       }
     </div>
   </div>
-</mat-toolbar>

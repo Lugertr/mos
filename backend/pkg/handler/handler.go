@@ -51,11 +51,11 @@ func (h *Handler) InitRoutes() *gin.Engine {
 	docs := router.Group("/api/documents")
 	docs.Use(h.userIdentityMiddleware)
 	{
-		docs.POST("", h.createDocument)       // multipart/json
-		docs.GET("", h.searchDocumentsByTag)  // query params: tag=..., limit, offset, author, type, date_from, date_to
-		docs.GET("/:id", h.getDocumentByID)   // optional ?requester_id may be ignored (we use token)
-		docs.PUT("/:id", h.updateDocument)    // multipart/json
-		docs.DELETE("/:id", h.deleteDocument) // only allowed if service permits
+		docs.POST("", h.createDocument)
+		docs.GET("", h.searchDocumentsByTag) // query params: tag=..., limit, offset, author, type, date_from, date_to
+		docs.GET("/:id", h.getDocumentByID)
+		docs.PUT("/:id", h.updateDocument)
+		docs.DELETE("/:id", h.deleteDocument)
 
 		// permission management (admin)
 		docs.POST("/:id/permissions", h.setDocumentPermission)      // body: target_user_id, can_view, can_edit

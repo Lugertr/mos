@@ -11,6 +11,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { PrivacyLabelPipe } from '../pipes/document-privacy.pipe';
 
 export type PrivacyType = 'public' | 'private';
 
@@ -33,7 +34,7 @@ export interface ArchiveDocument {
 @Component({
   selector: 'app-dashboard-card',
   standalone: true,
-  imports: [CommonModule, MatCardModule, MatIconModule, MatButtonModule, MatTooltipModule, DatePipe],
+  imports: [CommonModule, MatCardModule, MatIconModule, MatButtonModule, MatTooltipModule, PrivacyLabelPipe],
   templateUrl: './dashboard-card.component.html',
   styleUrls: ['./dashboard-card.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -43,19 +44,7 @@ export class DashboardCardComponent {
 
   @Output() edit = new EventEmitter<ArchiveDocument>();
   @Output() remove = new EventEmitter<ArchiveDocument>();
-  // эмитит новый privacy или объект { doc, newPrivacy }
   @Output() changePrivacy = new EventEmitter<{ doc: ArchiveDocument; newPrivacy: PrivacyType }>();
-
-  // утилиты для шаблона
-  readonly privacyLabelMap: Record<PrivacyType, string> = {
-    public: 'публичный',
-    private: 'приватный',
-  };
-
-  privacyLabel(p: PrivacyType | undefined | null): string {
-    if (!p) return '-';
-    return this.privacyLabelMap[p] ?? String(p);
-  }
 
   formatDate(date?: string | null): string {
     if (!date) return '-';

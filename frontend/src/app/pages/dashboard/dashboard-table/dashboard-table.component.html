@@ -15,7 +15,7 @@
       <td mat-cell *matCellDef="let row">{{ row.type_name ?? row.type_id }}</td>
     </ng-container>
 
-    <ng-container matColumnDef="author_name">
+    <ng-container matColumnDef="author">
       <th mat-header-cell mat-sort-header *matHeaderCellDef>Автор</th>
       <td mat-cell *matCellDef="let row">
         {{ row.author_name ?? row.author }}

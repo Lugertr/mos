@@ -17,8 +17,8 @@ import { MENU_ITEMS, MenuItem, PathWithSlash, RoutesPath } from 'src/app/app.rou
     MatToolbarModule,
     MatButtonModule,
     MatIconModule,
-    RouterModule
-  ],
+    RouterModule,
+],
   templateUrl: './navbar.component.html',
   styleUrl: './navbar.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -43,7 +43,7 @@ export class NavbarComponent {
   }
 
   get userLink(): string {
-    return PathWithSlash(RoutesPath.Home);
+    return PathWithSlash(RoutesPath.About);
   }
 
   get isAuth(): boolean {

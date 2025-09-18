@@ -37,6 +37,7 @@ export class DashboardComponent implements OnInit {
   private readonly reload$ = new Subject<void>();
   readonly documents = signal<ArchiveDocument[]>([]);
   readonly filter = signal('');
+  readonly selectedDoc = signal<ArchiveDocument | null>(null);
 
   constructor() {
     this.reload$.pipe(
@@ -57,6 +58,29 @@ export class DashboardComponent implements OnInit {
 
   refresh(): void {
     this.reload$.next();
+  }
+
+  selectDocument(document: ArchiveDocument): void {
+
+    if (!document) {
+      this.selectedDoc.set(null);
+      return;
+    }
+    this.documentService.getDocumentById(document.doc_id).pipe(
+      this.loadingBarSrv.withLoading(),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe({
+      next: (doc) => {
+        if (doc) {
+          this.selectedDoc.set(doc);
+        }
+      },
+      error: (err) => {
+        this.selectedDoc.set(null);
+        this.informerSrv.error(err?.error?.message, 'Ошибка получения информации о документе')
+      }
+    })
+
   }
 
   addDocument(): void {

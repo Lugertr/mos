@@ -185,8 +185,11 @@ END; $$;
 CREATE OR REPLACE FUNCTION _internal_attach_tag_to_document(p_document_id INT, p_tag_name TEXT) RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE tid INT;
 BEGIN
-  IF p_tag_name IS NULL THEN RETURN; END IF;
+  IF p_tag_name IS NULL OR btrim(p_tag_name) = '' THEN RETURN; END IF;
+
   tid := _internal_get_or_create_tag(p_tag_name);
+  IF tid IS NULL THEN RETURN; END IF;
+
   INSERT INTO document_tags (document_id, tag_id) VALUES (p_document_id, tid) ON CONFLICT DO NOTHING;
 END; $$;
 
@@ -254,7 +257,7 @@ END; $$;
 DROP TRIGGER IF EXISTS trg_after_delete_document_cleanup ON documents;
 CREATE TRIGGER trg_after_delete_document_cleanup AFTER DELETE ON documents FOR EACH ROW EXECUTE FUNCTION trg_after_delete_document_cleanup();
 
--- === SECURITY-FUNCTIONS (SECURITY DEFINER + search_path) ===
+-- Регистрация
 CREATE OR REPLACE FUNCTION fn_register_user(
   p_login TEXT,
   p_password TEXT,
@@ -267,7 +270,18 @@ LANGUAGE plpgsql AS $$
 DECLARE
   newid INT;
   v_role_id SMALLINT;
+  v_login citext;
 BEGIN
+  -- Валидация входных данных
+  IF p_login IS NULL OR btrim(p_login) = '' THEN
+    RAISE EXCEPTION 'p_login is required and must not be blank';
+  END IF;
+  IF p_password IS NULL OR btrim(p_password) = '' THEN
+    RAISE EXCEPTION 'p_password is required and must not be blank';
+  END IF;
+
+  v_login := btrim(p_login)::citext;
+
   -- Получаем id роли 'user'
   SELECT id INTO v_role_id FROM roles WHERE name = 'user';
   IF v_role_id IS NULL THEN
@@ -275,17 +289,17 @@ BEGIN
   END IF;
 
   INSERT INTO users (login, password_hash, full_name, role_id, created_at)
-  VALUES (p_login::citext, p_password, p_full_name, v_role_id, now())
+  VALUES (v_login, p_password, p_full_name, v_role_id, now())
   RETURNING id INTO newid;
 
   RETURN newid;
 EXCEPTION
   WHEN unique_violation THEN
-    RAISE EXCEPTION 'User with login % already exists', p_login;
+    RAISE EXCEPTION 'User with login % already exists', v_login;
 END;
 $$;
 
--- Авторизация: сравниваем хеши напрямую (передаёте уже захешированный пароль)
+-- Авторизация
 CREATE OR REPLACE FUNCTION fn_authorize_user(p_login TEXT, p_password TEXT)
 RETURNS TABLE (id INT, login citext, full_name TEXT, role_name TEXT) SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
 BEGIN
@@ -314,17 +328,18 @@ BEGIN
   RETURN v_perm;
 END; $$;
 
-CREATE OR REPLACE FUNCTION _can_user_view_document(p_user_id INT, p_document_id INT) RETURNS BOOLEAN SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION _can_user_view_document(p_user_id INT, p_document_id INT) RETURNS BOOLEAN
+SECURITY DEFINER SET search_path = public, pg_temp LANGUAGE plpgsql AS $$
 DECLARE v_role TEXT; v_privacy privacy_type; v_creator INT; v_perm BOOLEAN;
 BEGIN
   IF p_user_id IS NOT NULL THEN SELECT r.name INTO v_role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = p_user_id; END IF;
   SELECT d.privacy, d.created_by INTO v_privacy, v_creator FROM documents d WHERE d.id = p_document_id;
-  IF v_role = 'administrator' OR v_privacy = 'public' OR v_creator = p_user_id THEN RETURN TRUE; END IF;
+  IF v_role = 'administrator' OR v_privacy = 'public'::privacy_type OR v_creator = p_user_id THEN RETURN TRUE; END IF;
   SELECT EXISTS (SELECT 1 FROM document_permissions WHERE document_id = p_document_id AND user_id = p_user_id AND can_view) INTO v_perm;
   RETURN v_perm;
 END; $$;
 
--- === CRUD для документов
+-- Создание документа
 CREATE OR REPLACE FUNCTION fn_add_document(
   p_user_id INT,
   p_title TEXT,
@@ -343,11 +358,15 @@ DECLARE
   new_id INT;
   a_name citext := NULL;
   t TEXT;
+  v_privacy_lower TEXT;
 BEGIN
   -- Обязательные проверки
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'p_user_id is required'; END IF;
-  IF p_title IS NULL THEN RAISE EXCEPTION 'p_title is required'; END IF;
-  IF p_privacy IS NULL OR lower(p_privacy) NOT IN ('public','private') THEN
+  IF p_title IS NULL OR btrim(p_title) = '' THEN RAISE EXCEPTION 'p_title is required'; END IF;
+  IF p_privacy IS NULL THEN RAISE EXCEPTION 'p_privacy must be provided'; END IF;
+
+  v_privacy_lower := lower(btrim(p_privacy));
+  IF v_privacy_lower NOT IN ('public','private') THEN
     RAISE EXCEPTION 'p_privacy must be one of public/private';
   END IF;
 
@@ -357,7 +376,7 @@ BEGIN
 
   -- Вставка документа (atomic в рамках функции)
   INSERT INTO documents (title, privacy, created_at, created_by, document_date, author, type_id, file_bytea, geojson)
-  VALUES (p_title, p_privacy::privacy_type, now(), p_user_id, p_document_date, a_name, p_type_id, p_file, p_geojson)
+  VALUES (p_title, v_privacy_lower::privacy_type, now(), p_user_id, p_document_date, a_name, p_type_id, p_file, p_geojson)
   RETURNING id INTO new_id;
 
   -- Теги: убираем дубликаты, создаём и привязываем
@@ -390,12 +409,16 @@ DECLARE
   a_name citext := NULL;
   t TEXT;
   v_exists BOOLEAN;
+  v_privacy_lower TEXT;
 BEGIN
   -- Обязательные проверки
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'p_user_id is required'; END IF;
   IF p_document_id IS NULL THEN RAISE EXCEPTION 'p_document_id is required'; END IF;
-  IF p_title IS NULL THEN RAISE EXCEPTION 'p_title is required'; END IF;
-  IF p_privacy IS NULL OR lower(p_privacy) NOT IN ('public','private') THEN
+  IF p_title IS NULL OR btrim(p_title) = '' THEN RAISE EXCEPTION 'p_title is required'; END IF;
+  IF p_privacy IS NULL THEN RAISE EXCEPTION 'p_privacy must be provided'; END IF;
+
+  v_privacy_lower := lower(btrim(p_privacy));
+  IF v_privacy_lower NOT IN ('public','private') THEN
     RAISE EXCEPTION 'p_privacy must be one of public/private';
   END IF;
 
@@ -419,7 +442,7 @@ BEGIN
     type_id = p_type_id,
     file_bytea = p_file,
     geojson = p_geojson,
-    privacy = p_privacy::privacy_type,
+    privacy = v_privacy_lower::privacy_type,
     updated_at = now(),
     updated_by = p_user_id
   WHERE id = p_document_id;
@@ -501,7 +524,7 @@ BEGIN
   FROM documents d
   WHERE
     (v_role = 'administrator')
-    OR d.privacy = 'public'
+    OR d.privacy = 'public'::privacy_type
     OR (v_uid IS NOT NULL AND d.created_by = v_uid)
     OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND (dp.can_view OR dp.can_edit)))
   ORDER BY d.created_at DESC;
@@ -552,7 +575,7 @@ BEGIN
     SELECT 1 FROM documents d
     WHERE d.id = p_document_id
       AND (
-        d.privacy = 'public'
+        d.privacy = 'public'::privacy_type
         OR (v_uid IS NOT NULL AND d.created_by = v_uid)
         OR (v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_view))
       )
@@ -573,7 +596,6 @@ BEGIN
     WHERE d.id = p_document_id;
 END;
 $$;
-
 -- === Периодическая очистка ===
 CREATE OR REPLACE FUNCTION fn_periodic_cleanup() RETURNS JSONB
 SECURITY DEFINER
@@ -592,20 +614,15 @@ BEGIN
     v_tags_deleted := -1;
   END;
 
-
   v_result := jsonb_build_object(
     'started_at', to_jsonb(v_start),
     'finished_at', to_jsonb(now()),
-    'tags_deleted', to_jsonb(v_tags_deleted),
-    'authors_deleted', to_jsonb(v_authors_deleted)
+    'tags_deleted', to_jsonb(v_tags_deleted)
   );
 
   RETURN v_result;
 END;
 $$;
-
-
-
 
 -- ========== Подготовка: роли (на случай, если ещё нет) ==========
 INSERT INTO roles (id,name)

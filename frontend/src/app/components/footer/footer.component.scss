@@ -7,7 +7,8 @@
   padding: 1rem;
   margin: auto;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 2rem;
   max-width: var(--max-width);
   width: 100%;
 }
