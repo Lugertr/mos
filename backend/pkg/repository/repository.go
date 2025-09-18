@@ -13,6 +13,9 @@ type CtxUserIDKey struct{}
 type Authorization interface {
 	CreateUser(ctx context.Context, user archive.User) (int64, error)
 	GetUser(ctx context.Context, login, passwordHash string) (archive.User, error)
+	GetUsersByIDs(ctx context.Context, ids []int64) ([]archive.User, error)
+	UpdateUserFullName(ctx context.Context, requesterID int64, targetUserID int64, fullName string) error
+	ChangeUserPassword(ctx context.Context, requesterID int64, targetUserID int64, oldPasswordHash, newPasswordHash string) error
 }
 
 type DocumentTypes interface {

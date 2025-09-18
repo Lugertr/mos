@@ -41,9 +41,10 @@ CREATE TABLE IF NOT EXISTS documents (
   updated_at TIMESTAMPTZ,
   updated_by INTEGER REFERENCES users(id),
   document_date DATE,
-  author citext, -- теперь хранится имя автора как текст
+  author citext,
   type_id INTEGER REFERENCES document_types(id),
-  file_bytea BYTEA,
+  -- file metadata pointing to external object storage (S3/MinIO/local)
+  file_meta JSONB,
   geojson JSONB,
   geom geometry(Geometry,4326),
   CONSTRAINT documents_title_not_blank CHECK (btrim(title) <> '')
@@ -93,6 +94,10 @@ CREATE INDEX IF NOT EXISTS documents_privacy_idx ON documents (privacy);
 
 -- индекс для поиска по author
 CREATE INDEX IF NOT EXISTS documents_author_lower_idx ON documents (lower(author));
+
+-- индексы для file_meta (если требуется быстрый поиск по mime/bucket/key)
+CREATE INDEX IF NOT EXISTS documents_file_meta_mime_idx ON documents ((file_meta->>'mime'));
+CREATE INDEX IF NOT EXISTS documents_file_meta_bucket_idx ON documents ((file_meta->>'bucket'));
 
 -- === GEOJSON: валидация и заполнение geom (более устойчиво, с попыткой MakeValid) ===
 CREATE OR REPLACE FUNCTION fn_validate_geojson(p_geojson JSONB) RETURNS BOOLEAN
@@ -208,7 +213,7 @@ BEGIN
 END;
 $$;
 
--- === Логирование (маска password_hash/file_bytea). Теперь использует current_setting с безопасным флагом ===
+-- === Логирование (маска password_hash/file_meta). Теперь использует current_setting с безопасным флагом ===
 CREATE OR REPLACE FUNCTION fn_log_changes() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
   v_user_id INTEGER;
@@ -226,18 +231,18 @@ BEGIN
   IF v_user_id IS NOT NULL THEN SELECT login INTO v_user_login FROM users WHERE id = v_user_id; ELSE v_user_login := current_user; END IF;
 
   IF TG_OP = 'INSERT' THEN
-    v_new := to_jsonb(NEW) - 'password_hash' - 'file_bytea';
+    v_new := to_jsonb(NEW) - 'password_hash' - 'file_meta';
     INSERT INTO logs(action, table_name, record_id, user_id, user_login, tg_op, session_of_user, action_time, changes)
     VALUES ('create'::action_type, TG_TABLE_NAME, NEW.id, v_user_id, v_user_login, v_tg_op, v_session_of_user, now(), jsonb_build_object('new', v_new));
     RETURN NEW;
   ELSIF TG_OP = 'UPDATE' THEN
-    v_old := to_jsonb(OLD) - 'password_hash' - 'file_bytea';
-    v_new := to_jsonb(NEW) - 'password_hash' - 'file_bytea';
+    v_old := to_jsonb(OLD) - 'password_hash' - 'file_meta';
+    v_new := to_jsonb(NEW) - 'password_hash' - 'file_meta';
     INSERT INTO logs(action, table_name, record_id, user_id, user_login, tg_op, session_of_user, action_time, changes)
     VALUES ('update'::action_type, TG_TABLE_NAME, NEW.id, v_user_id, v_user_login, v_tg_op, v_session_of_user, now(), jsonb_build_object('old', v_old, 'new', v_new));
     RETURN NEW;
   ELSE
-    v_old := to_jsonb(OLD) - 'password_hash' - 'file_bytea';
+    v_old := to_jsonb(OLD) - 'password_hash' - 'file_meta';
     INSERT INTO logs(action, table_name, record_id, user_id, user_login, tg_op, session_of_user, action_time, changes)
     VALUES ('delete'::action_type, TG_TABLE_NAME, OLD.id, v_user_id, v_user_login, v_tg_op, v_session_of_user, now(), jsonb_build_object('old', v_old));
     RETURN OLD;
@@ -346,7 +351,7 @@ CREATE OR REPLACE FUNCTION fn_add_document(
   p_document_date DATE,
   p_author TEXT,     
   p_type_id INT,
-  p_file BYTEA,
+  p_file_meta JSONB,
   p_geojson JSONB,
   p_tags TEXT[],
   p_privacy TEXT
@@ -375,8 +380,8 @@ BEGIN
   END IF;
 
   -- Вставка документа (atomic в рамках функции)
-  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author, type_id, file_bytea, geojson)
-  VALUES (p_title, v_privacy_lower::privacy_type, now(), p_user_id, p_document_date, a_name, p_type_id, p_file, p_geojson)
+  INSERT INTO documents (title, privacy, created_at, created_by, document_date, author, type_id, file_meta, geojson)
+  VALUES (p_title, v_privacy_lower::privacy_type, now(), p_user_id, p_document_date, a_name, p_type_id, p_file_meta, p_geojson)
   RETURNING id INTO new_id;
 
   -- Теги: убираем дубликаты, создаём и привязываем
@@ -397,7 +402,7 @@ CREATE OR REPLACE FUNCTION fn_update_document(
   p_document_date DATE,
   p_author TEXT,       
   p_type_id INT,
-  p_file BYTEA,
+  p_file_meta JSONB,
   p_geojson JSONB,
   p_tags TEXT[],
   p_privacy TEXT
@@ -440,7 +445,7 @@ BEGIN
     document_date = p_document_date,
     author = a_name,
     type_id = p_type_id,
-    file_bytea = p_file,
+    file_meta = p_file_meta,
     geojson = p_geojson,
     privacy = v_privacy_lower::privacy_type,
     updated_at = now(),
@@ -480,6 +485,122 @@ BEGIN
   IF NOT is_user_admin(p_user_id) THEN RAISE EXCEPTION 'Only administrator may remove permissions'; END IF;
   DELETE FROM document_permissions WHERE document_id = p_document_id AND user_id = p_target_user_id;
 END; $$;
+
+-- Получение списка пользователей (id, full_name) по массиву id (или все, если NULL).
+
+CREATE OR REPLACE FUNCTION fn_get_users_by_ids(p_ids INT[])
+RETURNS TABLE (id INT, full_name TEXT)
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF p_ids IS NULL THEN
+    RETURN QUERY SELECT u.id, u.full_name FROM users u ORDER BY u.id;
+  ELSE
+    RETURN QUERY SELECT u.id, u.full_name FROM users u WHERE u.id = ANY(p_ids) ORDER BY u.id;
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_update_user_full_name(
+  p_requester_id INT,
+  p_target_user_id INT,
+  p_full_name TEXT
+)
+RETURNS VOID
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_is_admin BOOLEAN := FALSE;
+  v_trimmed TEXT;
+BEGIN
+  IF p_requester_id IS NULL THEN
+    RAISE EXCEPTION 'p_requester_id is required';
+  END IF;
+  IF p_target_user_id IS NULL THEN
+    RAISE EXCEPTION 'p_target_user_id is required';
+  END IF;
+
+  -- trim and validate full name (allow NULL to clear name)
+  IF p_full_name IS NOT NULL THEN
+    v_trimmed := btrim(p_full_name);
+    IF v_trimmed = '' THEN
+      RAISE EXCEPTION 'p_full_name must not be blank when provided';
+    END IF;
+  ELSE
+    v_trimmed := NULL;
+  END IF;
+
+  v_is_admin := is_user_admin(p_requester_id);
+
+  IF NOT v_is_admin AND p_requester_id <> p_target_user_id THEN
+    RAISE EXCEPTION 'only administrator or the user themself may change full_name';
+  END IF;
+
+  UPDATE users
+  SET full_name = v_trimmed
+  WHERE id = p_target_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user % not found', p_target_user_id;
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_change_user_password(
+  p_requester_id INT,
+  p_target_user_id INT,
+  p_old_password TEXT,
+  p_new_password TEXT
+)
+RETURNS VOID
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_is_admin BOOLEAN := FALSE;
+  v_current TEXT;
+BEGIN
+  IF p_requester_id IS NULL THEN
+    RAISE EXCEPTION 'p_requester_id is required';
+  END IF;
+  IF p_target_user_id IS NULL THEN
+    RAISE EXCEPTION 'p_target_user_id is required';
+  END IF;
+  IF p_new_password IS NULL OR btrim(p_new_password) = '' THEN
+    RAISE EXCEPTION 'p_new_password is required and must not be blank';
+  END IF;
+
+  v_is_admin := is_user_admin(p_requester_id);
+
+  -- admin changing other's password: allowed without old password
+  IF v_is_admin AND p_requester_id <> p_target_user_id THEN
+    UPDATE users SET password_hash = p_new_password WHERE id = p_target_user_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'user % not found', p_target_user_id;
+    END IF;
+    RETURN;
+  END IF;
+
+  -- otherwise (self-change or admin changing own password) require old password match
+  SELECT password_hash INTO v_current FROM users WHERE id = p_target_user_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user % not found', p_target_user_id;
+  END IF;
+
+  IF v_current IS NULL THEN
+    RAISE EXCEPTION 'current password missing for user %', p_target_user_id;
+  END IF;
+
+  -- verify old password: must match stored string (same logic as existing fn_authorize_user)
+  IF v_current <> COALESCE(p_old_password,'') THEN
+    RAISE EXCEPTION 'old password does not match';
+  END IF;
+
+  UPDATE users SET password_hash = p_new_password WHERE id = p_target_user_id;
+END;
+$$;
 
 -- === Получение документов для пользователя ===
 CREATE OR REPLACE FUNCTION fn_get_documents_for_user(p_requester_id INT)
@@ -544,7 +665,7 @@ RETURNS TABLE (
   document_date DATE,
   author citext,
   type_id INT,
-  file_bytea BYTEA,
+  file_meta JSONB,
   geojson JSONB,
   geom geometry(Geometry,4326),
   can_edit BOOLEAN
@@ -564,7 +685,7 @@ BEGIN
   IF v_role = 'administrator' THEN
     RETURN QUERY
       SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
-             d.document_date, d.author, d.type_id, d.file_bytea, d.geojson, d.geom,
+             d.document_date, d.author, d.type_id, d.file_meta, d.geojson, d.geom,
              TRUE AS can_edit
       FROM documents d
       WHERE d.id = p_document_id;
@@ -587,7 +708,7 @@ BEGIN
 
   RETURN QUERY
     SELECT d.id, d.title, d.privacy, d.created_at, d.created_by, d.updated_at, d.updated_by,
-           d.document_date, d.author, d.type_id, d.file_bytea, d.geojson, d.geom,
+           d.document_date, d.author, d.type_id, d.file_meta, d.geojson, d.geom,
            (CASE WHEN v_role = 'administrator' THEN TRUE
                  WHEN v_uid IS NOT NULL AND d.created_by = v_uid THEN TRUE
                  WHEN v_uid IS NOT NULL AND EXISTS (SELECT 1 FROM document_permissions dp WHERE dp.document_id = d.id AND dp.user_id = v_uid AND dp.can_edit) THEN TRUE
@@ -596,6 +717,7 @@ BEGIN
     WHERE d.id = p_document_id;
 END;
 $$;
+
 -- === Периодическая очистка ===
 CREATE OR REPLACE FUNCTION fn_periodic_cleanup() RETURNS JSONB
 SECURITY DEFINER
@@ -651,7 +773,7 @@ INSERT INTO tags (name) VALUES
   ('environment'), ('cleanup'), ('boundary'), ('city'), ('notes')
 ON CONFLICT (name) DO NOTHING;
 
--- ========== Вставка 5 документов через fn_add_document (возвращает id) ==========
+-- ========== Вставка 5 документов через fn_add_document (возвращает id) =========
 
 -- 1) Public point (created by Alice)
 SELECT fn_add_document(
@@ -660,12 +782,11 @@ SELECT fn_add_document(
   '2025-06-01'::date, -- document_date
   'Dr. Alice', -- author
   2, -- type_id = map
-  NULL, -- file bytea
+  NULL, -- file_meta (NULL)
   NULL,
   ARRAY['park','survey'], -- tags
   'public' -- privacy
 ) AS new_document_id;
-
 
 -- 2) Private report (created by Admin) — дадим доступ пользователю bob
 WITH d AS (

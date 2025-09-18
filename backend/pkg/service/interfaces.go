@@ -12,6 +12,9 @@ type Authorization interface {
 	GenerateToken(ctx context.Context, username, password string) (string, error)
 	RefreshToken(ctx context.Context, accessToken string) (string, error)
 	ParseToken(ctx context.Context, token string) (int64, error)
+	GetUsersByIDs(ctx context.Context, ids []int64) ([]archive.User, error)
+	UpdateUserFullName(ctx context.Context, requesterID int64, targetUserID int64, fullName string) error
+	ChangeUserPassword(ctx context.Context, requesterID int64, targetUserID int64, oldPasswordHash, newPasswordHash string) error
 }
 
 // DocumentTypes сервис (справочник document_types)

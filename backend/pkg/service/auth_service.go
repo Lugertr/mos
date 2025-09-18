@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"archive"
@@ -100,4 +101,35 @@ func (s *AuthService) generatePasswordHash(password string) string {
 	h := sha256.New()
 	h.Write([]byte(password))
 	return fmt.Sprintf("%x", h.Sum([]byte(salt)))
+}
+
+func (s *AuthService) GetUsersByIDs(ctx context.Context, ids []int64) ([]archive.User, error) {
+	return s.repo.GetUsersByIDs(ctx, ids)
+}
+
+func (s *AuthService) UpdateUserFullName(ctx context.Context, requesterID int64, targetUserID int64, fullName string) error {
+	if requesterID == 0 || targetUserID == 0 {
+		return errors.New("invalid user ids")
+	}
+	// trim проверка можно оставить в БД; но добавим лёгкую проверку
+	if strings.TrimSpace(fullName) == "" {
+		return errors.New("full_name must not be blank")
+	}
+	return s.repo.UpdateUserFullName(ctx, requesterID, targetUserID, fullName)
+}
+
+func (s *AuthService) ChangeUserPassword(ctx context.Context, requesterID int64, targetUserID int64, oldPassword, newPassword string) error {
+	if requesterID == 0 || targetUserID == 0 {
+		return errors.New("invalid user ids")
+	}
+	if strings.TrimSpace(newPassword) == "" {
+		return errors.New("new password required")
+	}
+	oldHash := ""
+	if strings.TrimSpace(oldPassword) != "" {
+		oldHash = s.generatePasswordHash(oldPassword)
+	}
+	newHash := s.generatePasswordHash(newPassword)
+
+	return s.repo.ChangeUserPassword(ctx, requesterID, targetUserID, oldHash, newHash)
 }

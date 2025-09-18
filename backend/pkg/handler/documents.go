@@ -3,7 +3,6 @@ package handler
 import (
 	"archive"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,17 +18,13 @@ func (h *Handler) createDocument(c *gin.Context) {
 		return
 	}
 
-	// собираем входные поля в DocumentCreateInput
 	var in archive.DocumentCreateInput
-
 	in.Title = c.PostForm("title")
 
-	// privacy (optional)
 	if p := c.PostForm("privacy"); p != "" {
 		in.Privacy = archive.PrivacyType(p)
 	}
 
-	// document_date (optional)
 	if v := c.PostForm("document_date"); v != "" {
 		if t, err := parseDateFlexible(v); err == nil {
 			in.DocumentDate = &t
@@ -43,7 +38,6 @@ func (h *Handler) createDocument(c *gin.Context) {
 		in.Author = &v
 	}
 
-	// document_type_id -> TypeID
 	if v := c.PostForm("document_type_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
 			in.TypeID = &id
@@ -59,7 +53,6 @@ func (h *Handler) createDocument(c *gin.Context) {
 		in.GeoJSON = &raw
 	}
 
-	// tags (optional) — comma separated
 	if v := c.PostForm("tags"); v != "" {
 		parts := strings.Split(v, ",")
 		for i := range parts {
@@ -75,18 +68,29 @@ func (h *Handler) createDocument(c *gin.Context) {
 			return
 		}
 		defer f.Close()
-		b, err := io.ReadAll(f)
+
+		contentType := fileHdr.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		// fileHdr.Size is int64
+		meta, err := h.storage.UploadStream(c.Request.Context(), fileHdr.Filename, f, fileHdr.Size, contentType)
 		if err != nil {
-			newErrorResponse(c, http.StatusInternalServerError, "failed to read uploaded file")
+			newErrorResponse(c, http.StatusInternalServerError, "failed to upload file")
 			return
 		}
-		in.File = &b // <-- теперь указатель
+		in.FileMeta = &archive.FileMeta{
+			Provider: meta.Provider,
+			Bucket:   meta.Bucket,
+			Key:      meta.Key,
+			Mime:     meta.Mime,
+			Size:     meta.Size,
+			Sha256:   meta.Sha256,
+		}
 	}
 
-	// creator id
 	in.CreatorID = creatorID
 
-	// Создаём через сервис
 	id, err := h.services.Document.CreateDocument(c.Request.Context(), in)
 	if err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
@@ -123,22 +127,6 @@ func (h *Handler) searchDocumentsByTag(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
-// getDocumentByID
-func (h *Handler) getDocumentByID(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		newErrorResponse(c, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	item, err := h.services.Document.GetDocumentByID(c.Request.Context(), id)
-	if err != nil {
-		newErrorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, item)
-}
-
 // updateDocument — поддерживает multipart/form-data с GeoJSON
 func (h *Handler) updateDocument(c *gin.Context) {
 	updaterID, err := getUserId(c)
@@ -157,7 +145,6 @@ func (h *Handler) updateDocument(c *gin.Context) {
 	in.DocumentID = id
 	in.UpdaterID = updaterID
 
-	// optional fields — if present, set pointers
 	if v := c.PostForm("title"); v != "" {
 		in.Title = &v
 	}
@@ -203,7 +190,7 @@ func (h *Handler) updateDocument(c *gin.Context) {
 		in.Tags = &parts
 	}
 
-	// file upload
+	// file upload (optional) -> stream
 	if fileHdr, err := c.FormFile("file"); err == nil {
 		f, err := fileHdr.Open()
 		if err != nil {
@@ -211,19 +198,56 @@ func (h *Handler) updateDocument(c *gin.Context) {
 			return
 		}
 		defer f.Close()
-		b, err := io.ReadAll(f)
+
+		contentType := fileHdr.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+
+		meta, err := h.storage.UploadStream(c.Request.Context(), fileHdr.Filename, f, fileHdr.Size, contentType)
 		if err != nil {
-			newErrorResponse(c, http.StatusInternalServerError, "failed to read uploaded file")
+			newErrorResponse(c, http.StatusInternalServerError, "failed to upload file")
 			return
 		}
-		in.File = &b
+		in.FileMeta = &archive.FileMeta{
+			Provider: meta.Provider,
+			Bucket:   meta.Bucket,
+			Key:      meta.Key,
+			Mime:     meta.Mime,
+			Size:     meta.Size,
+			Sha256:   meta.Sha256,
+		}
 	}
 
 	if err := h.services.Document.UpdateDocument(c.Request.Context(), in.DocumentID, in); err != nil {
 		newErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// getDocumentByID — возвращаем документ и, при наличии FileMeta, presigned URL
+func (h *Handler) getDocumentByID(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		newErrorResponse(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	item, err := h.services.Document.GetDocumentByID(c.Request.Context(), id)
+	if err != nil {
+		newErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if item.FileMeta != nil && h.storage != nil {
+		// signed URL for short duration (например 300 сек)
+		if url, err := h.storage.SignedURL(c.Request.Context(), item.FileMeta.Bucket, item.FileMeta.Key, 300); err == nil {
+			item.DownloadURL = url
+		}
+	}
+
+	c.JSON(http.StatusOK, item)
 }
 
 // deleteDocument

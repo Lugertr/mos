@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"archive"
@@ -89,4 +90,115 @@ func (h *Handler) refreshToken(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, map[string]interface{}{"token": newToken})
+}
+
+type updateFullNameInput struct {
+	FullName string `json:"full_name" binding:"required"`
+}
+
+// PUT /api/users/full_name
+// current user is taken from token (getUserId)
+func (h *Handler) updateUserFullName(c *gin.Context) {
+	requesterID, err := getUserId(c)
+	if err != nil || requesterID == 0 {
+		newErrorResponse(c, http.StatusUnauthorized, "user not authorized")
+		return
+	}
+
+	var in updateFullNameInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		newErrorResponse(c, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	// call service: requester changes own full_name
+	if err := h.services.Authorization.UpdateUserFullName(c.Request.Context(), requesterID, requesterID, in.FullName); err != nil {
+		// можно расширить маппинг ошибок по тексту
+		newErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// body: { "old_password": "...", "new_password": "..." }
+// old_password required for non-admins (enforced in DB logic)
+type changePasswordInput struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// PUT /api/users/password
+// current user is taken from token (getUserId)
+func (h *Handler) changeUserPassword(c *gin.Context) {
+	requesterID, err := getUserId(c)
+	if err != nil || requesterID == 0 {
+		newErrorResponse(c, http.StatusUnauthorized, "user not authorized")
+		return
+	}
+
+	var in changePasswordInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		newErrorResponse(c, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	// service will hash passwords and call DB fn_change_user_password
+	if err := h.services.Authorization.ChangeUserPassword(c.Request.Context(), requesterID, requesterID, in.OldPassword, in.NewPassword); err != nil {
+		// mismatch old password -> возвращаем 400
+		newErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *Handler) getUsers(c *gin.Context) {
+	// require authentication (middleware sets user id in context via getUserId)
+	_, err := getUserId(c)
+	if err != nil {
+		newErrorResponse(c, http.StatusUnauthorized, "user not authorized")
+		return
+	}
+
+	idsParam := c.Query("ids")
+	var ids []int64
+	if idsParam != "" {
+		parts := strings.Split(idsParam, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				newErrorResponse(c, http.StatusBadRequest, "invalid ids param")
+				return
+			}
+			ids = append(ids, id)
+		}
+	} else {
+		// ids == nil -> repository will fetch all
+		ids = nil
+	}
+
+	users, err := h.services.Authorization.GetUsersByIDs(c.Request.Context(), ids)
+	if err != nil {
+		newErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// response format: array of { id, full_name }
+	out := make([]map[string]interface{}, 0, len(users))
+	for _, u := range users {
+		m := map[string]interface{}{"id": u.ID}
+		if u.FullName != nil {
+			m["full_name"] = *u.FullName
+		} else {
+			m["full_name"] = nil
+		}
+		out = append(out, m)
+	}
+
+	c.JSON(http.StatusOK, out)
 }

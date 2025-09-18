@@ -35,24 +35,33 @@ const (
 	PrivacyPrivate PrivacyType = "private"
 )
 
+type FileMeta struct {
+	Provider     string `json:"provider,omitempty"`      // "s3"|"minio"|"local"
+	Bucket       string `json:"bucket,omitempty"`        // bucket name
+	Key          string `json:"key,omitempty"`           // object key
+	Mime         string `json:"mime,omitempty"`          // content-type
+	Size         int64  `json:"size,omitempty"`          // bytes
+	Sha256       string `json:"sha256,omitempty"`        // hex checksum
+	StorageClass string `json:"storage_class,omitempty"` // optional
+	ThumbKey     string `json:"thumbnail_key,omitempty"` // optional
+}
+
 // Document — основная сущность документов.
 // Поля указателями там, где в схеме допускается NULL.
 type Document struct {
-	ID           int64       `db:"id" json:"id"`
-	Title        string      `db:"title" json:"title"`
-	Privacy      PrivacyType `db:"privacy" json:"privacy"`
-	CreatedAt    time.Time   `db:"created_at" json:"created_at"`
-	CreatedBy    *int64      `db:"created_by" json:"created_by,omitempty"`
-	UpdatedAt    *time.Time  `db:"updated_at" json:"updated_at,omitempty"`
-	UpdatedBy    *int64      `db:"updated_by" json:"updated_by,omitempty"`
-	DocumentDate *time.Time  `db:"document_date" json:"document_date,omitempty"`
-	// author — теперь имя автора как текст (citext), может быть NULL
-	Author *string `db:"author" json:"author,omitempty"`
-	TypeID *int64  `db:"type_id" json:"type_id,omitempty"`
-	// файл может быть NULL => указываем как *([]byte)
-	File    *[]byte          `db:"file_bytea" json:"file,omitempty"`
-	GeoJSON *json.RawMessage `db:"geojson" json:"geojson,omitempty"`
-	Geom    *string          `db:"geom" json:"geom,omitempty"`
+	ID           int64            `db:"id" json:"id"`
+	Title        string           `db:"title" json:"title"`
+	Privacy      PrivacyType      `db:"privacy" json:"privacy"`
+	CreatedAt    time.Time        `db:"created_at" json:"created_at"`
+	CreatedBy    *int64           `db:"created_by" json:"created_by,omitempty"`
+	UpdatedAt    *time.Time       `db:"updated_at" json:"updated_at,omitempty"`
+	UpdatedBy    *int64           `db:"updated_by" json:"updated_by,omitempty"`
+	DocumentDate *time.Time       `db:"document_date" json:"document_date,omitempty"`
+	Author       *string          `db:"author" json:"author,omitempty"`
+	TypeID       *int64           `db:"type_id" json:"type_id,omitempty"`
+	FileMeta     *FileMeta        `db:"file_meta" json:"file_meta,omitempty"`
+	GeoJSON      *json.RawMessage `db:"geojson" json:"geojson,omitempty"`
+	Geom         *string          `db:"geom" json:"geom,omitempty"`
 }
 
 // --- Связующие таблицы ---------------------------------------------------
@@ -116,7 +125,9 @@ type DocumentSecure struct {
 	Viewers           []int64     `db:"viewers" json:"viewers,omitempty"`
 	Editors           []int64     `db:"editors" json:"editors,omitempty"`
 	CanRequesterEdit  bool        `db:"can_requester_edit" json:"can_requester_edit"`
-	Geom              *string     `db:"geom" json:"geom,omitempty"`
+	Geom              *string     `db:"geom" json:"geom,omitempty"` // ST_AsGeoJSON(geom)
+	FileMeta          *FileMeta   `db:"file_meta" json:"file_meta,omitempty"`
+	DownloadURL       string      `json:"download_url,omitempty"`
 }
 
 // DocumentCreateInput — удобная структура для передачи данных из handler->service
@@ -126,8 +137,8 @@ type DocumentCreateInput struct {
 	DocumentDate *time.Time
 	Author       *string
 	TypeID       *int64
-	File         *[]byte          // nil -> NULL в БД
-	GeoJSON      *json.RawMessage // nil -> NULL в БД
+	FileMeta     *FileMeta
+	GeoJSON      *json.RawMessage
 	Tags         []string
 	CreatorID    int64
 }
@@ -140,7 +151,7 @@ type DocumentUpdateInput struct {
 	DocumentDate *time.Time
 	Author       *string
 	TypeID       *int64
-	File         *[]byte
+	FileMeta     *FileMeta
 	GeoJSON      *json.RawMessage
 	Tags         *[]string
 	UpdaterID    int64

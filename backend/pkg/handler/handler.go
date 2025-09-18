@@ -2,6 +2,7 @@ package handler
 
 import (
 	"archive/pkg/service"
+	"archive/storage"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -9,10 +10,14 @@ import (
 
 type Handler struct {
 	services *service.Service
+	storage  storage.Storage
 }
 
-func NewHandler(services *service.Service) *Handler {
-	return &Handler{services: services}
+func NewHandler(svc *service.Service, st storage.Storage) *Handler {
+	return &Handler{
+		services: svc,
+		storage:  st,
+	}
 }
 
 func (h *Handler) InitRoutes() *gin.Engine {
@@ -32,6 +37,11 @@ func (h *Handler) InitRoutes() *gin.Engine {
 
 	ref := router.Group("/api")
 	{
+
+		ref.GET("/users", h.getUsers)
+		ref.PUT("/users/full_name", h.updateUserFullName)
+		ref.PUT("/users/password", h.changeUserPassword)
+
 		// document types
 		ref.POST("/document_types", h.createDocumentType)
 		ref.GET("/document_types", h.getAllDocumentTypes)

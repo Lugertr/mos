@@ -20,7 +20,6 @@ func NewDocumentPostgres(db *sqlx.DB) *DocumentPostgres {
 	return &DocumentPostgres{db: db}
 }
 
-// userIDFromCtx возвращает user id из контекста (поддерживает int/int64/*int64)
 func userIDFromCtx(ctx context.Context) (int64, bool) {
 	v := ctx.Value(CtxUserIDKey{})
 	if v == nil {
@@ -41,8 +40,7 @@ func userIDFromCtx(ctx context.Context) (int64, bool) {
 	}
 }
 
-// --- helpers for nullable params ---
-// возвращает nil если geojson == nil или пустой, иначе валидированный json.RawMessage
+// helpers
 func geoJSONParam(m *json.RawMessage) (interface{}, error) {
 	if m == nil || len(*m) == 0 {
 		return nil, nil
@@ -51,15 +49,6 @@ func geoJSONParam(m *json.RawMessage) (interface{}, error) {
 		return nil, fmt.Errorf("invalid geojson")
 	}
 	return *m, nil
-}
-
-func bytesParam(b *[]byte) interface{} {
-	if b == nil || len(*b) == 0 {
-		// если хотим отличать пустой слайс от NULL, можно вернуть *b,
-		// но текущее поведение: пустой слайс -> NULL (как раньше).
-		return nil
-	}
-	return *b
 }
 
 func trimStringParam(s *string) interface{} {
@@ -80,7 +69,19 @@ func privacyParam(p archive.PrivacyType) interface{} {
 	return string(p)
 }
 
-// --- CreateDocument -> fn_add_document ---
+func marshalFileMeta(fm *archive.FileMeta) (interface{}, error) {
+	if fm == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(fm)
+	if err != nil {
+		return nil, err
+	}
+	var raw json.RawMessage = b
+	return raw, nil
+}
+
+// CreateDocument -> calls fn_add_document(p_user_id, p_title, p_document_date, p_author, p_type_id, p_file_meta, p_geojson, p_tags, p_privacy)
 func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.DocumentCreateInput) (int64, error) {
 	var id int64
 
@@ -88,7 +89,10 @@ func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.Docume
 	if err != nil {
 		return 0, err
 	}
-	fileVal := bytesParam(in.File)
+	fileMetaVal, err := marshalFileMeta(in.FileMeta)
+	if err != nil {
+		return 0, err
+	}
 	authorVal := trimStringParam(in.Author)
 	privacyVal := privacyParam(in.Privacy)
 
@@ -99,7 +103,7 @@ func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.Docume
 		in.DocumentDate,
 		authorVal,
 		in.TypeID,
-		fileVal,
+		fileMetaVal,
 		geojsonVal,
 		in.Tags,
 		privacyVal,
@@ -110,7 +114,7 @@ func (r *DocumentPostgres) CreateDocument(ctx context.Context, in archive.Docume
 	return id, nil
 }
 
-// --- SearchDocumentsByTag -> fn_get_documents_for_user ---
+// SearchDocumentsByTag (unchanged structure — file_meta not required here)
 func (r *DocumentPostgres) SearchDocumentsByTag(ctx context.Context, filter archive.DocumentSearchFilter) ([]archive.DocumentSecure, error) {
 	const q = `
 SELECT
@@ -171,9 +175,6 @@ ORDER BY COALESCE(updated_at, now()) DESC
 			DocumentDate:     rr.DocumentDate,
 			Author:           authorPtr,
 			TypeID:           rr.TypeID,
-			Tags:             nil,
-			Viewers:          nil,
-			Editors:          nil,
 			CanRequesterEdit: rr.CanEdit,
 		}
 		if rr.GeoJSON != nil && len(*rr.GeoJSON) > 0 {
@@ -198,14 +199,7 @@ ORDER BY COALESCE(updated_at, now()) DESC
 	return out[start:end], nil
 }
 
-func nullString(s string) interface{} {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return s
-}
-
-// --- GetDocumentByID -> fn_get_document_by_id ---
+// GetDocumentByID -> returns file_meta JSONB (and other fields)
 func (r *DocumentPostgres) GetDocumentByID(ctx context.Context, id int64) (archive.DocumentSecure, error) {
 	const q = `
 SELECT
@@ -219,7 +213,7 @@ SELECT
   document_date,
   author,
   type_id,
-  file_bytea,
+  file_meta,
   geojson,
   ST_AsGeoJSON(geom) as geom,
   can_edit
@@ -243,7 +237,7 @@ LIMIT 1
 		DocumentDate *time.Time          `db:"document_date"`
 		Author       sql.NullString      `db:"author"`
 		TypeID       *int64              `db:"type_id"`
-		File         []byte              `db:"file_bytea"`
+		FileMeta     *json.RawMessage    `db:"file_meta"`
 		GeoJSON      *json.RawMessage    `db:"geojson"`
 		Geom         *string             `db:"geom"`
 		CanEdit      bool                `db:"can_edit"`
@@ -268,6 +262,14 @@ LIMIT 1
 		authorPtr = &s
 	}
 
+	var fileMeta *archive.FileMeta
+	if row.FileMeta != nil && len(*row.FileMeta) > 0 {
+		var fm archive.FileMeta
+		if err := json.Unmarshal(*row.FileMeta, &fm); err == nil {
+			fileMeta = &fm
+		}
+	}
+
 	out := archive.DocumentSecure{
 		DocID:            row.ID,
 		Title:            row.Title,
@@ -279,19 +281,17 @@ LIMIT 1
 		DocumentDate:     row.DocumentDate,
 		Author:           authorPtr,
 		TypeID:           row.TypeID,
-		Tags:             nil,
-		Viewers:          nil,
-		Editors:          nil,
-		CanRequesterEdit: row.CanEdit,
+		FileMeta:         fileMeta,
 		Geom:             row.Geom,
+		CanRequesterEdit: row.CanEdit,
 	}
 
-	_ = row.File
 	_ = row.GeoJSON
 
 	return out, nil
 }
 
+// UpdateDocument -> fn_update_document(... p_file_meta JSONB ...)
 func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in archive.DocumentUpdateInput) error {
 	if in.DocumentID == 0 {
 		in.DocumentID = id
@@ -309,7 +309,10 @@ func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in arch
 		titleParam = *in.Title
 	}
 
-	fileParam := bytesParam(in.File)
+	fileMetaParam, err := marshalFileMeta(in.FileMeta)
+	if err != nil {
+		return err
+	}
 
 	geojsonVal, err := geoJSONParam(in.GeoJSON)
 	if err != nil {
@@ -336,7 +339,7 @@ func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in arch
 		in.DocumentDate,
 		authorVal,
 		in.TypeID,
-		fileParam,
+		fileMetaParam,
 		geojsonVal,
 		tagsParam,
 		privacyVal,
@@ -344,7 +347,6 @@ func (r *DocumentPostgres) UpdateDocument(ctx context.Context, id int64, in arch
 	return err
 }
 
-// DeleteDocument, SetDocumentPermission, RemoveDocumentPermission — без изменений
 func (r *DocumentPostgres) DeleteDocument(ctx context.Context, id int64) error {
 	uid, ok := userIDFromCtx(ctx)
 	if !ok {
@@ -361,7 +363,7 @@ func (r *DocumentPostgres) SetDocumentPermission(ctx context.Context, docID int6
 		return fmt.Errorf("user id missing in context")
 	}
 	query := `SELECT ` + fnSetDocumentPermission + `($1,$2,$3,$4,$5)`
-	_, err := r.db.ExecContext(ctx, query, adminID, docID, p.UserID, p.CanView, p.CanEdit)
+	_, err := r.db.ExecContext(ctx, query, docID, adminID, p.UserID, p.CanView, p.CanEdit)
 	return err
 }
 
@@ -371,6 +373,6 @@ func (r *DocumentPostgres) RemoveDocumentPermission(ctx context.Context, docID i
 		return fmt.Errorf("user id missing in context")
 	}
 	query := `SELECT ` + fnRemoveDocumentPermission + `($1,$2,$3)`
-	_, err := r.db.ExecContext(ctx, query, adminID, docID, targetUserID)
+	_, err := r.db.ExecContext(ctx, query, docID, adminID, targetUserID)
 	return err
 }

@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 
 	"archive"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 type AuthPostgres struct {
@@ -51,4 +53,47 @@ func (r *AuthPostgres) GetUser(ctx context.Context, login, passwordHash string) 
 		u.FullName = fullName
 	}
 	return u, nil
+}
+
+func (r *AuthPostgres) GetUsersByIDs(ctx context.Context, ids []int64) ([]archive.User, error) {
+	const q = `SELECT id, full_name FROM ` + "fn_get_users_by_ids" + `($1)`
+	rows, err := r.db.QueryxContext(ctx, q, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := make([]archive.User, 0)
+	for rows.Next() {
+		var id int64
+		var fullName sql.NullString
+		if err := rows.Scan(&id, &fullName); err != nil {
+			return nil, err
+		}
+		u := archive.User{
+			ID: id,
+		}
+		if fullName.Valid {
+			u.FullName = &fullName.String
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// UpdateUserFullName -> SELECT fn_update_user_full_name(p_requester_id, p_target_user_id, p_full_name)
+func (r *AuthPostgres) UpdateUserFullName(ctx context.Context, requesterID int64, targetUserID int64, fullName string) error {
+	const q = `SELECT ` + "fn_update_user_full_name" + `($1,$2,$3)`
+	_, err := r.db.ExecContext(ctx, q, requesterID, targetUserID, fullName)
+	return err
+}
+
+// ChangeUserPassword -> SELECT fn_change_user_password(p_requester_id, p_target_user_id, p_old_password, p_new_password)
+func (r *AuthPostgres) ChangeUserPassword(ctx context.Context, requesterID int64, targetUserID int64, oldPasswordHash, newPasswordHash string) error {
+	const q = `SELECT ` + "fn_change_user_password" + `($1,$2,$3,$4)`
+	_, err := r.db.ExecContext(ctx, q, requesterID, targetUserID, oldPasswordHash, newPasswordHash)
+	return err
 }
